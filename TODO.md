@@ -22,7 +22,7 @@ A shippable local-first Markdown notes app.
 - [x] **T14** Verify offline: kill the network, reload, confirm list + edit + search all work. *Verified headlessly (agent-browser, 2026-09-23): SW-served shell reload with server dead; create/edit/search/tag all function offline.*
 - [x] **T15** Verify subpath deploy: serve from a subdirectory, confirm assets, manifest install, and SW scope all resolve. *Verified at `/NOTED/` (agent-browser, 2026-09-23): worker active, scope `/NOTED/`, all 14 shell files incl. `icon.svg` precached.*
 - [x] **T16** Write `docs/deployment.md` for the chosen host (GitHub Pages workflow **or** `deploy.sh` rsync script). *Written host-agnostic; sizing decision left open for T17.*
-- [x] **T17** Deploy the MVP and verify it live. — target chosen: GitHub Pages + custom subdomain `noted.360481025.xyz` (CNAME pairing, branch publish from `main`, Enforce HTTPS). *Live 2026-09-23 (agent-browser): SW scope `https://noted.360481025.xyz/`, cache `noted-v3` with all 14 shell files, hard-offline create/edit verified; Enforce HTTPS pending GitHub certificate issuance.*
+- [x] **T17** Deploy the MVP and verify it live. — target chosen: GitHub Pages + custom subdomain `noted.360481025.xyz` (CNAME pairing, branch publish from `main`, Enforce HTTPS). *Live 2026-09-23 (agent-browser): SW scope `https://noted.360481025.xyz/`, cache `noted-v3` with all 14 shell files, hard-offline create/edit verified; Enforce HTTPS active.*
 
 ## v1 — P1
 
