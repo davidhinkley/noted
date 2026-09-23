@@ -131,6 +131,25 @@ body {
   border-color: var(--danger);
 }
 
+.btn.tiny {
+  padding: 3px 12px;
+  font-size: 0.8rem;
+}
+
+.note-card-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.trash-card {
+  border-style: dashed;
+}
+
+.trash-card:hover {
+  border-color: var(--border);
+}
+
 /* ---- layout ---- */
 
 .main {

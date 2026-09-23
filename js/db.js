@@ -71,6 +71,28 @@ export async function listByTag(tag) {
   return notes;
 }
 
+/** Soft-deleted notes only, most recently updated first. */
+export function listTrashedNotes() {
+  return db.notes
+    .orderBy('updatedAt')
+    .reverse()
+    .filter((n) => n.deletedAt != null)
+    .toArray();
+}
+
+/** Restore: the only sanctioned way to clear deletedAt. Bumps updatedAt. */
+export function restoreNote(id) {
+  return updateNote(id, { deletedAt: null });
+}
+
+/**
+ * Permanently delete. THE ONLY hard delete in the app — the trash view
+ * (T21) is the sole caller. Everything else soft-deletes on purpose.
+ */
+export function hardDelete(id) {
+  return db.notes.delete(id);
+}
+
 /** Everything, including soft-deleted — the lossless backup for export. */
 export function listAllNotes() {
   return db.notes.orderBy('updatedAt').reverse().toArray();

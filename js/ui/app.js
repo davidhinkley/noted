@@ -61,6 +61,32 @@ document.addEventListener('alpine:init', () => {
         this.route = route;
         await this.loadRoute();
       });
+      document.addEventListener('keydown', (e) => this.onKeydown(e));
+    },
+
+    // Keyboard shortcuts (T22): Ctrl/Cmd+N new, +S save, +E preview, +K search.
+    onKeydown(e) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      if (key === 'n') {
+        e.preventDefault();
+        this.newNote();
+      } else if (key === 's') {
+        e.preventDefault();
+        this.saveNow();
+      } else if (key === 'e') {
+        e.preventDefault();
+        this.togglePreview();
+      } else if (key === 'k') {
+        e.preventDefault();
+        this.focusSearch();
+      }
+    },
+
+    focusSearch() {
+      if (this.route.name === 'note') return;
+      const el = this.$root.querySelector('.search');
+      if (el) el.focus();
     },
 
     get visibleNotes() {
@@ -99,7 +125,9 @@ document.addEventListener('alpine:init', () => {
       this.notes =
         this.route.name === 'tag'
           ? await db.listByTag(this.route.params.tag)
-          : await db.listActiveNotes();
+          : this.route.name === 'trash'
+            ? await db.listTrashedNotes()
+            : await db.listActiveNotes();
       buildIndex(this.notes);
     },
 
@@ -173,6 +201,17 @@ document.addEventListener('alpine:init', () => {
       this.note = null;
       await db.softDelete(id);
       navigate('#/');
+    },
+
+    async restore(id) {
+      await db.restoreNote(id);
+      await this.refreshList();
+    },
+
+    async purge(id) {
+      if (!window.confirm('Delete this note forever? This cannot be undone.')) return;
+      await db.hardDelete(id);
+      await this.refreshList();
     },
 
     async exportAll() {

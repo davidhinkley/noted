@@ -12,6 +12,11 @@ const ROUTES = [
     pattern: /^#\/tag\/(.+)\/?$/,
     params: (m) => ({ tag: safeDecode(m[1]) }),
   },
+  {
+    name: 'trash',
+    pattern: /^#\/trash\/?$/,
+    params: () => ({}),
+  },
 ];
 
 function safeDecode(value) {

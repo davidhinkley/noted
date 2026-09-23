@@ -30,13 +30,14 @@
     <header class="topbar">
       <a class="brand" href="#/">NOTED</a>
       <template x-if="route.name !== 'note'">
-        <input class="search" type="search" x-model="query" placeholder="Search notes…" autocomplete="off">
+        <input class="search" type="search" x-model="query" placeholder="Search notes…" autocomplete="off" title="Search (Ctrl+K)">
       </template>
       <span class="topbar-spacer"></span>
       <div class="topbar-actions">
         <button type="button" class="btn" @click="triggerImport()">Import</button>
         <button type="button" class="btn" @click="exportAll()">Export</button>
-        <button type="button" class="btn primary" @click="newNote()">+ New</button>
+        <a class="btn" href="#/trash">Trash</a>
+        <button type="button" class="btn primary" title="New note (Ctrl+N)" @click="newNote()">+ New</button>
       </div>
     </header>
 
@@ -83,6 +84,35 @@
         </section>
       </template>
 
+      <!-- TRASH view -->
+      <template x-if="route.name === 'trash'">
+        <section class="list-view">
+          <h1 class="view-title">Trash</h1>
+          <p class="view-sub"><a href="#/">← Back to notes</a></p>
+
+          <div class="empty" x-show="!visibleNotes.length">
+            <template x-if="query.trim()"><span>No trashed notes match your search.</span></template>
+            <template x-if="!query.trim()"><span>Trash is empty.</span></template>
+          </div>
+
+          <div class="note-list">
+            <template x-for="n in visibleNotes" :key="n.id">
+              <article class="note-card trash-card">
+                <div class="note-card-head">
+                  <span class="note-title" x-text="n.title || 'Untitled'"></span>
+                  <time class="note-date" x-text="'Deleted ' + fmtDate(n.deletedAt)"></time>
+                </div>
+                <p class="note-excerpt" x-text="excerpt(n.body)"></p>
+                <div class="note-card-actions">
+                  <button type="button" class="btn tiny" @click="restore(n.id)">Restore</button>
+                  <button type="button" class="btn tiny danger" @click="purge(n.id)">Delete forever</button>
+                </div>
+              </article>
+            </template>
+          </div>
+        </section>
+      </template>
+
       <!-- EDITOR view -->
       <template x-if="route.name === 'note' && note">
         <section class="editor">
@@ -90,7 +120,7 @@
             <button type="button" class="btn" @click="goBack()">← Notes</button>
             <span class="save-state" x-text="saveLabel"></span>
             <span class="editor-bar-spacer"></span>
-            <button type="button" class="btn" @click="togglePreview()" x-text="preview ? 'Edit' : 'Preview'"></button>
+            <button type="button" class="btn" title="Toggle preview (Ctrl+E)" @click="togglePreview()" x-text="preview ? 'Edit' : 'Preview'"></button>
             <button type="button" class="btn" @click="exportMD()">.md</button>
             <button type="button" class="btn danger" @click="removeNote()">Delete</button>
           </div>

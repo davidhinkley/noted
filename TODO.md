@@ -27,8 +27,8 @@ A shippable local-first Markdown notes app.
 ## v1 — P1
 
 - [ ] **T20** Replace the `<textarea>` with CodeMirror 6 (Markdown mode). *DoD: zero changes to the data model.*
-- [ ] **T21** Add trash view (`#/trash`) with restore, and hard-delete from trash only.
-- [ ] **T22** Add keyboard shortcuts (new note, save, focus search, toggle preview).
+- [x] **T21** Add trash view (`#/trash`) with restore, and hard-delete from trash only. *Verified: `db.hardDelete` reachable only from the trash view; restore is the sole way to clear `deletedAt`.*
+- [x] **T22** Add keyboard shortcuts (new note, save, focus search, toggle preview). *Ctrl/Cmd+N new, +S save, +E preview, +K search; hints on controls.*
 - [ ] **T23** Add settings persisted to localStorage (theme, font size, default preview state). *The only sanctioned localStorage use — settings, never note data.*
 - [ ] **T24** Add folders: new `folders` table via Dexie v2 with a migration backfill.
 - [ ] **T25** Add offline/online indicator and an IndexedDB storage-usage estimate.
@@ -57,3 +57,4 @@ These are decisions, not unfinished work. Do not pick them up; argue against the
 ## Done
 
 - **MVP P0** — T01–T16 complete. T17 pending deploy-target decision (GitHub Pages vs. shared host).
+- **v1** — T21 (trash view, restore, trash-only hard delete) and T22 (keyboard shortcuts). Next: T20 (CodeMirror 6) / T23 (settings).
