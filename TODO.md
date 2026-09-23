@@ -22,7 +22,7 @@ A shippable local-first Markdown notes app.
 - [x] **T14** Verify offline: kill the network, reload, confirm list + edit + search all work. *Verified headlessly (agent-browser, 2026-09-23): SW-served shell reload with server dead; create/edit/search/tag all function offline.*
 - [x] **T15** Verify subpath deploy: serve from a subdirectory, confirm assets, manifest install, and SW scope all resolve. *Verified at `/NOTED/` (agent-browser, 2026-09-23): worker active, scope `/NOTED/`, all 14 shell files incl. `icon.svg` precached.*
 - [x] **T16** Write `docs/deployment.md` for the chosen host (GitHub Pages workflow **or** `deploy.sh` rsync script). *Written host-agnostic; sizing decision left open for T17.*
-- [ ] **T17** Deploy the MVP and verify it from the subpath. — deploy path is ready (`pnpm deploy` → `deploy.sh`, shared host, subpath); blocked on real credentials (`DEPLOY_HOST`/`DEPLOY_DIR`) and the network being reachable.
+- [ ] **T17** Deploy the MVP and verify it live. — target chosen: GitHub Pages + custom subdomain `noted.360481025.xyz` (CNAME pairing, branch publish from `main`, Enforce HTTPS). Procedure in `docs/deployment.md`.
 
 ## v1 — P1
 
@@ -56,5 +56,5 @@ These are decisions, not unfinished work. Do not pick them up; argue against the
 
 ## Done
 
-- **MVP P0** — T01–T16 complete. T17 pending deploy-target decision (GitHub Pages vs. shared host).
+- **MVP P0** — T01–T16 complete. T17 in flight: GitHub Pages + custom subdomain chosen, live verification pending.
 - **v1** — T21 (trash view, restore, trash-only hard delete) and T22 (keyboard shortcuts). Next: T20 (CodeMirror 6) / T23 (settings).
