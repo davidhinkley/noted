@@ -1,0 +1,14 @@
+# Dependencies (dev-only tooling; the app itself ships zero npm deps)
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+.~lock.*

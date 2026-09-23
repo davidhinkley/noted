@@ -1,0 +1,248 @@
+# architecture.md
+
+NOTED's shared mental model. Read this when `AGENTS.md` isn't enough. It explains *why*, points at what is deliberately out of scope, and records decisions so they don't get re-litigated.
+
+## 1. Overview
+
+NOTED is a personal Markdown notes app that runs **entirely in the browser**. It is local-first: the browser is the primary source of truth, all reads and writes go to local storage first, and the network exists only to *deliver the app* — never to serve data. The app works fully offline, deploys as static files to any shared web host, and keeps no account, no server, and no database outside the user's device.
+
+The original brief is preserved as `NOTED_plan.md` (read-only reference; it is the source of the local-first mandate and the storage/host analysis, not a working document).
+
+## 2. Principles
+
+1. **Local-first.** Core functionality never depends on the network. If the host disappears, the app still works and the data is still on the device.
+2. **Buildless.** No compiler, no bundler, no transpilation. Source files are the shipped files. This is a deliberate constraint, not a limitation — see D2 and *Migration triggers*.
+3. **Static-hostable.** The artifact is a directory of static files with no server-side requirements.
+4. **Content is opaque.** Note bodies are uninterpreted bytes at the storage boundary. The DB layer never parses them. This is what keeps encryption and format changes possible later without a rewrite.
+5. **Editor is swappable.** The editor is a UI component, not an architecture decision. `body` is raw Markdown; any editor can produce it.
+6. **Subdirectory-relative by default.** Paths resolve relative to the app directory so the same build works at `/`, `/notes/`, or `/<repo>/`.
+
+## 3. System overview
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Browser — the only runtime                                  │
+│                                                              │
+│  index.html                                                  │
+│    └─ Alpine components (js/ui/*)                            │
+│         │            │                        │              │
+│         │      router.js                  search.js          │
+│         │   #/  #/note/:id  #/tag/:tag     (Fuse.js index)   │
+│         │            │                        │              │
+│         └────────────┴───────────┬────────────┘              │
+│                                ▼                            │
+│                          db.js (Dexie)                       │
+│                                │                            │
+│                    ┌───────────┴───────────┐                │
+│                    ▼                       ▼                │
+│              IndexedDB              sw.js + manifest.json    │
+│              notes[] (folders: T24) (offline shell cache)     │
+│                                                              │
+│   io/export.js ──► *.json / *.md      io/import.js ◄── *.json │
+└──────────────────────────────────────────────────────────────┘
+
+   Static host ── serves files only ── never touches data
+```
+
+Data flow is one-directional from UI to Dexie and back. There is no server in the loop at any point.
+
+## 4. Technology decisions
+
+| Concern | Choice | Rejected alternatives |
+| --- | --- | --- |
+| Storage | **IndexedDB via Dexie.js** | Raw IndexedDB (verbose, error-prone); localStorage (5MB, synchronous, strings only); SQLite WASM (~1–2MB binary, same persistence underneath) |
+| UI | **Alpine.js via CDN** | React (build step + bundle overhead); Vue/Svelte (excellent, but build step is premature — see D2); vanilla-only (fine but harder to maintain) |
+| Search | **Fuse.js** | Full-text indexes in IndexedDB (overkill pre-scale) |
+| Markdown | **marked + DOMPurify** | Storing rendered HTML (breaks portability); react-markdown (pulls in React) |
+| Routing | **Hash router** | History API + `404.html` fallback (host-specific coupling) |
+| Styling | **Vanilla CSS** | CSS-in-JS and preprocessors (build step; framework lock-in) |
+| Deployment | **Static files, subdirectory-relative** | SSR (violates local-first); root-absolute paths (breaks under a subpath) |
+
+Full rationale for each is in **Decisions** at the end of this file.
+
+## 5. Data model
+
+### Dexie schema (v1)
+
+```js
+db.version(1).stores({
+  notes: 'id, title, folderId, updatedAt, deletedAt, *tags'
+});
+```
+
+- `id` is the primary key. It is **not** auto-increment — records carry client-generated UUIDv4.
+- `*tags` is a multi-entry index, enabling `where('tags').equals('foo')` without scanning.
+- `deletedAt` is indexed so the list query can exclude soft-deleted rows cheaply.
+
+### Note record
+
+| Field | Type | Purpose / constraint |
+| --- | --- | --- |
+| `id` | string (UUIDv4) | Primary key. Client-generated. Never reused, never recycled. |
+| `title` | string | Display only; may be empty. Derived from the first heading or line. |
+| `body` | string | **Raw Markdown.** Opaque at the storage boundary. |
+| `tags` | string[] | Multi-entry index. Lowercased on write. |
+| `folderId` | string \| null | Optional grouping. A `folders` table arrives in Dexie v2 (T24). |
+| `createdAt` | number (ms) | Immutable after creation. |
+| `updatedAt` | number (ms) | Bumped on every write. |
+| `deletedAt` | number \| null | Soft delete. Set, never removed except by *restore*. |
+| `attachments` | string[] | **Reserved.** References future attachment IDs. Always `[]` in MVP. |
+
+### Why this shape
+
+- **UUIDv4 + `createdAt`/`updatedAt` + soft deletes** are the three prerequisites for any future sync. Without them, adding sync means a data migration and an ID collision problem. With them, it is a protocol problem.
+- **Opaque `body`** is what makes encryption a storage-boundary concern rather than an app-wide one: swap Dexie's write path to encrypt and the read path to decrypt, and nothing else changes.
+- **`attachments: []` reserved** keeps blobs out of the notes table. Binary blobs belong in a separate store or OPFS, referenced by ID.
+- **No auto-increment IDs.** They collide on day one of sync and make export/import non-idempotent.
+
+## 6. Module boundaries
+
+| Module | Owns | Must not do |
+| --- | --- | --- |
+| `js/db.js` | Dexie schema, versions, migrations, CRUD | Never parse or transform `body`. Never touch the DOM. |
+| `js/search.js` | Building and querying the Fuse index | Never write to the DB. |
+| `js/router.js` | Hash parsing, route table, view switching | Never contain view logic. |
+| `js/ui/*` | Alpine components, rendering, events | Never issue raw IndexedDB calls — go through `db.js`. |
+| `js/pwa.js` | Service-worker registration | Never contain cache logic (that lives in `sw.js`). |
+| `js/io/*` | Serialization and import validation | Never mutate notes directly — hand results to `db.js`. |
+| `sw.js` | Fetch interception, cache strategy, invalidation | Never reach into IndexedDB. |
+
+**Index update strategy.** Rebuilding the Fuse index on every keystroke will not survive a real notes collection, so: rebuild **on route change** into `#/` or `#/tag/:tag`, and rebuild on a **debounced (~300ms) trailing edge** after a mutation while already on a list view. Incremental insert/remove is not worth the duplicated state at this scale — revisit alongside T33 when notes exceed ~2,000.
+
+## 7. Routing
+
+| Route | View |
+| --- | --- |
+| `#/` | Note list, sorted by `updatedAt` desc |
+| `#/note/:id` | Editor + Markdown preview |
+| `#/tag/:tag` | List filtered to one tag |
+| `#/trash` | Soft-deleted notes — **v1** (T21), not MVP |
+
+Everything after the `#` is invisible to a static server, so no rewrite rules, no `404.html` hack, and no host-specific configuration. The cost is uglier URLs; the trade is that the app works on any static host unchanged. See D3.
+
+## 8. PWA strategy
+
+Without a service worker, "runs in the browser" is false advertising: offline, the browser cannot even load the HTML, despite the data sitting safely in IndexedDB. So the service worker ships in the MVP.
+
+- **`manifest.json`** — relative paths only: `"start_url": "./"`, `"scope": "./"`, `icons[].src` relative. Relative values resolve against the manifest's own URL, so `/notes/manifest.json` with `"./"` resolves to `/notes/` — which is what makes a subpath install work.
+- **`sw.js` lives at the app-directory root**, beside `index.html`. A worker's scope is derived from its location; burying it in `js/` would restrict it to `js/`.
+- **Registration:** `navigator.serviceWorker.register('sw.js', { scope: './' })` — both arguments relative to the registering page.
+- **Cache URLs resolved against scope, never against `/`:**
+  ```js
+  const base = self.registration.scope; // ends with '/'
+  const urlsToCache = [base, new URL('index.html', base).href, new URL('css/style.css', base).href];
+  ```
+- **Strategy:** precache **same-origin shell files only** on `install` (`index.html`, `css/style.css`, `js/*`, icons); serve them cache-first. Handle CDN library URLs **opportunistically** — stale-while-revalidate on `fetch`, network falling back to cache, never precached on `install`.
+  - *Why the split:* CDN responses are **cross-origin and opaque**. You cannot read their status, and cache-first on an opaque response can serve a broken library offline — a known footgun that costs a day to debug. Same-origin precache is safe; cross-origin belongs in the runtime path where a network failure degrades gracefully.
+  - *Fallback:* if runtime CDN caching proves flaky, self-host the five libraries under `vendor/` (same-origin, precacheable). Not needed yet.
+- **Invalidation:** there is no content hashing without a build step, so a `CACHE_VERSION` constant in `sw.js` is the release mechanism — bump it, and `activate` deletes the old cache. **Every release must bump it.**
+
+## 9. Data portability and security
+
+- **Export** ships two formats: **JSON** (all notes, one file, lossless) and **Markdown** (one `.md` per note). Per-note `.md` download is MVP; bulk `.md` (a zip) is deferred to v1 since it needs a second CDN dependency. See `TODO.md` **T12/T26**.
+- **Import** accepts the JSON format. Validate `schemaVersion` and reject unrecognized versions; **ignore unrecognized fields** rather than erroring, so a future export format imports cleanly into an older app (forward compatibility). Rejecting unknown fields would break v1 imports the day `folderId` is added in v2.
+- **Encryption is out of scope for now**, but `body` opacity means it lands cleanly later: derive a key from a passphrase with the Web Crypto API, and wrap only the Dexie read/write path in AES-256-GCM. Note the real cost is UX — a lost passphrase is unrecoverable data.
+
+## 10. Deployment
+
+**Default layout: the app is served from a subdirectory.** All paths are relative to the app directory.
+
+| Host | Notes |
+| --- | --- |
+| GitHub Pages (project site) | Base path is `/<repo>/`. Relative paths need no configuration. Deploy by pushing static files to the Pages branch, or a copy-to-Pages workflow. |
+| Shared hosting (subdirectory) | Upload to the target directory via FTP/rsync. Same relative-path assumptions. |
+| Shared hosting (domain root) | Relative paths still work unchanged; the subdirectory prefix simply isn't there. |
+
+Assuming subdirectory-first is strictly more portable: moving root → subpath requires touching the manifest, the service worker, and every asset path; moving subpath → root requires nothing. No `<base>` tag — it is one deployment-specific edit that silently desyncs the service worker's scope if forgotten.
+
+Host-specific commands live in `docs/deployment.md` (not yet written — `TODO.md` **T16**).
+
+## 11. Limits and non-functional concerns
+
+- **Search scale.** Fuse.js is fast to roughly 2,000–5,000 notes. Past that, move index building into a Web Worker (T33).
+- **Storage quota.** IndexedDB offers ~1GB+ typically, but browsers can evict it under disk pressure. Export/import is the backup story, not a nice-to-have.
+- **No `file://` support.** IndexedDB requires a secure context (`http(s)` or `localhost`). Use `pnpm dev`.
+- **Browser support.** Evergreen browsers only: IndexedDB, service workers, ES modules.
+- **Accessibility and keyboard navigation** are v1 (T22), not MVP. This is a deliberate deferral, not an oversight: the MVP exists to validate the storage boundary, routing, and offline story before the surface grows. That said, for a text-heavy app keyboard navigation is arguably core rather than polish — T22 should be treated as early-v1, not late-v1, and must not slip past it.
+
+## 12. Out of scope
+
+| Feature | Why it is out | What keeps the door open |
+| --- | --- | --- |
+| End-to-end encryption | UX burden (passphrase, unrecoverable data) and key migration for existing notes | `body` is opaque at the boundary; encrypt/decrypt wraps Dexie only |
+| Attachments / binary files | Blob storage, upload/download UI, size limits, export complexity | `attachments: []` reserved; separate store or OPFS, never blobs in `notes` |
+| Cross-device sync | Conflict resolution, auth, a server — the hardest local-first problem | UUIDv4 IDs, `createdAt`/`updatedAt`, soft deletes |
+| CodeMirror 6 editor | Polish; a textarea validates the data model first | `body` is raw Markdown; editor is a swappable component |
+| Clean URLs | Host-specific `404.html` coupling | Hash routing |
+| Bulk Markdown export (zip) | Needs a second CDN dependency before it is proven necessary | JSON export is lossless; per-note `.md` covers the common case |
+| Lint / tests / CI | Premature tooling on an unvalidated product | `package.json` dev-deps only; `AGENTS.md` names the gaps explicitly |
+
+## 13. Migration triggers
+
+The buildless Alpine approach is a starting bet, not a life sentence. Migrate to Vue 3 or Svelte + Vite when **any** of these is true:
+
+- An Alpine component exceeds roughly 200 lines of `x-` directives and becomes unreadable.
+- You need more than two third-party UI libraries that have no CDN build.
+- You need real lint, typecheck, or test tooling integrated into the workflow.
+- The un-bundled CDN payload measurably hurts first load.
+
+At that point the product is validated and the build complexity is justified. **Add React to the table only if a specific ecosystem dependency demands it** (e.g., TipTap) — for a notes app its bundle and build overhead are not worth it on a static host.
+
+---
+
+## Decisions
+
+An inlined decision log. Same format as an ADR, just not yet split into files.
+
+### D1. Storage: IndexedDB via Dexie.js
+- **Status:** accepted
+- **Date:** 2026-09-23
+- **Context:** Need structured, queryable, high-capacity local storage for notes with tags and timestamps.
+- **Decision:** Use Dexie.js over raw IndexedDB, localStorage, SQLite WASM, and OPFS.
+- **Consequences:** Adds a ~20KB CDN dependency. Schema versioning and transactions are handled. Complex relational queries would outgrow it, but the data model is deliberately flat.
+
+### D2. UI: Alpine.js via CDN, no build step
+- **Status:** accepted
+- **Date:** 2026-09-23
+- **Context:** Need reactivity without committing to build infrastructure on a static host.
+- **Decision:** Alpine.js loaded from CDN; no bundler, compiler, or CI.
+- **Consequences:** Source is the artifact — deployment is a file copy. Component size and lack of tree-shaking are the ceilings; see *Migration triggers*.
+
+### D3. Routing: hash-based
+- **Status:** accepted
+- **Date:** 2026-09-23
+- **Context:** Static host with no server-side rewrites.
+- **Decision:** Use `#/note/:id` hash routes; no History API, no `404.html` fallback.
+- **Consequences:** Ugly URLs, but zero host configuration and identical behavior everywhere.
+
+### D4. Content format: raw Markdown, opaque at the boundary
+- **Status:** accepted
+- **Date:** 2026-09-23
+- **Context:** Notes need a portable, future-proof content format.
+- **Decision:** Store raw Markdown in `body`; the DB layer never parses it; rendering uses `marked` + `DOMPurify`.
+- **Consequences:** Export is a byte copy. Encryption becomes a storage-boundary concern. Rendered HTML is never persisted, so a rendering bug cannot corrupt data.
+
+### D5. Identity: UUIDv4, timestamps, soft deletes
+- **Status:** accepted
+- **Date:** 2026-09-23
+- **Context:** Sync and multi-device are future possibilities, not current requirements.
+- **Decision:** UUIDv4 primary keys, immutable `createdAt`, monotonic `updatedAt`, `deletedAt` soft deletes.
+- **Consequences:** Slightly more storage than integers; makes sync and import idempotent. Hard deletes exist only as an explicit trash-view action.
+
+### D6. PWA: minimal service worker from day one, subdirectory-relative
+- **Status:** accepted
+- **Date:** 2026-09-23
+- **Context:** Offline is the core promise; retrofitting a service worker under a subpath is painful.
+- **Decision:** Ship `manifest.json` + `sw.js` in the MVP; all paths relative, scoped to the app directory; `CACHE_VERSION` bump is the invalidation mechanism; precache same-origin shell only, with cross-origin CDN URLs handled by stale-while-revalidate at fetch time.
+- **Consequences:** Every release must bump `CACHE_VERSION`. Users get stale-but-functional shell rather than a 404. Opaque cross-origin responses are deliberately kept out of the precache list; self-hosting under `vendor/` is the fallback if runtime CDN caching proves flaky.
+
+### D7. Deployment: subdirectory-relative paths, host-agnostic
+- **Status:** accepted
+- **Date:** 2026-09-23
+- **Context:** Target hosts include GitHub Pages project sites and shared hosting, both of which may serve under a path.
+- **Decision:** No leading slashes in same-origin paths; no `<base>` tag; resolve service-worker URLs against `self.registration.scope`.
+- **Consequences:** Works at `/`, `/notes/`, and `/<repo>/` with no per-target edits. The trade is that relative paths in JavaScript must be written carefully.
+
+### Split trigger
+
+When this section exceeds ~5 decisions or one screen — or the first time a decision already recorded here is re-litigated in a PR — split it into `docs/decisions/NNNN-short-title.md` and replace it with a link list. Add `0001-record-architecture-decisions.md` (the meta-ADR documenting the decision to use ADRs) at that point, not before.
