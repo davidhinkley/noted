@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NOTED — local-first Markdown notes</title>
+  <meta name="description" content="NOTED — local-first Markdown notes in your browser. Works offline. Your data never leaves your device.">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="theme-color" content="#1b1d22">
+
+  <link rel="stylesheet" href="css/style.css">
+
+  <!-- CDN libraries. No build step: the source is the artifact. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/dexie@4.0.10/dist/dexie.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+  <!-- Alpine is an ES module imported by js/ui/app.js, so components register
+       before Alpine.start() runs. The UMD build auto-starts on its own microtask,
+       before later <script type="module"> files execute. -->
+
+  <!-- App modules -->
+  <script type="module" src="js/ui/app.js"></script>
+  <script type="module" src="js/pwa.js"></script>
+</head>
+<body>
+  <div id="app" x-data="app" x-cloak>
+    <header class="topbar">
+      <a class="brand" href="#/">NOTED</a>
+      <template x-if="route.name !== 'note'">
+        <input class="search" type="search" x-model="query" placeholder="Search notes…" autocomplete="off">
+      </template>
+      <span class="topbar-spacer"></span>
+      <div class="topbar-actions">
+        <button type="button" class="btn" @click="triggerImport()">Import</button>
+        <button type="button" class="btn" @click="exportAll()">Export</button>
+        <button type="button" class="btn primary" @click="newNote()">+ New</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- LIST + TAG views -->
+      <template x-if="route.name === 'list' || route.name === 'tag'">
+        <section class="list-view">
+          <h1 class="view-title" x-show="route.name === 'tag'">
+            Tagged <span class="tag-chip" x-text="'#' + route.params.tag"></span>
+          </h1>
+          <p
+            class="view-sub"
+            x-show="route.name === 'list' && !query && notes.length"
+            x-text="notes.length + ' note' + (notes.length === 1 ? '' : 's')"
+          ></p>
+
+          <div class="empty" x-show="!visibleNotes.length">
+            <template x-if="query.trim()"><span>No notes match your search.</span></template>
+            <template x-if="!query.trim() && route.name === 'list'"><span>No notes yet — hit <strong>+ New</strong> to write your first one.</span></template>
+            <template x-if="!query.trim() && route.name === 'tag'"><span>No notes with this tag.</span></template>
+          </div>
+
+          <div class="note-list">
+            <template x-for="n in visibleNotes" :key="n.id">
+              <article class="note-card" @click="open(n.id)">
+                <div class="note-card-head">
+                  <span class="note-title" x-text="n.title || 'Untitled'"></span>
+                  <time class="note-date" x-text="fmtDate(n.updatedAt)"></time>
+                </div>
+                <p class="note-excerpt" x-text="excerpt(n.body)"></p>
+                <div class="note-tags" x-show="n.tags.length">
+                  <template x-for="t in n.tags" :key="t">
+                    <a
+                      class="tag-chip"
+                      :href="'#/tag/' + encodeURIComponent(t)"
+                      @click.stop
+                      x-text="'#' + t"
+                    ></a>
+                  </template>
+                </div>
+              </article>
+            </template>
+          </div>
+        </section>
+      </template>
+
+      <!-- EDITOR view -->
+      <template x-if="route.name === 'note' && note">
+        <section class="editor">
+          <div class="editor-bar">
+            <button type="button" class="btn" @click="goBack()">← Notes</button>
+            <span class="save-state" x-text="saveLabel"></span>
+            <span class="editor-bar-spacer"></span>
+            <button type="button" class="btn" @click="togglePreview()" x-text="preview ? 'Edit' : 'Preview'"></button>
+            <button type="button" class="btn" @click="exportMD()">.md</button>
+            <button type="button" class="btn danger" @click="removeNote()">Delete</button>
+          </div>
+
+          <input
+            class="title-input"
+            x-model="note.title"
+            @input="touch()"
+            placeholder="Title"
+            autocomplete="off"
+          >
+          <input
+            class="tags-input"
+            x-model="note.tagsInput"
+            @input="touch()"
+            placeholder="tags, separated, by, commas"
+            autocomplete="off"
+          >
+
+          <div class="editor-body">
+            <textarea
+              x-show="!preview"
+              x-model="note.body"
+              @input="touch()"
+              placeholder="Write Markdown…"
+              spellcheck="true"
+            ></textarea>
+            <article class="preview markdown-body" x-show="preview" x-html="rendered"></article>
+          </div>
+        </section>
+      </template>
+
+      <!-- NOT FOUND -->
+      <template x-if="route.name === 'notfound'">
+        <section class="empty">
+          <p>That page doesn’t exist. <a href="#/">Back to your notes</a>.</p>
+        </section>
+      </template>
+    </main>
+
+    <input
+      type="file"
+      accept=".json,application/json"
+      x-ref="importFile"
+      @change="onImportFile($event)"
+      hidden
+    >
+  </div>
+</body>
+</html>

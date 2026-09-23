@@ -1,0 +1,14 @@
+{
+  "name": "noted",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first Markdown notes. Buildless static SPA — zero runtime dependencies, all libraries from CDN.",
+  "scripts": {
+    "dev": "serve -s .",
+    "start": "serve -s .",
+    "deploy": "bash deploy.sh"
+  },
+  "devDependencies": {
+    "serve": "^14.2.4"
+  }
+}

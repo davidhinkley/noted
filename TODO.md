@@ -6,23 +6,23 @@ Prioritized work queue. One line per item, verb-first. No rationale here — see
 
 A shippable local-first Markdown notes app.
 
-- [ ] **T01** Add `package.json` with dev-only deps (`serve`); document `pnpm dev` in `AGENTS.md`.
-- [ ] **T02** Write `index.html` loading Alpine, Dexie, Fuse.js, marked, DOMPurify from CDN.
-- [ ] **T03** Define Dexie schema v1 in `js/db.js` (`'id, title, folderId, updatedAt, deletedAt, *tags'`).
-- [ ] **T04** Implement note CRUD: create, read, update, soft-delete (`deletedAt`). *DoD: no UI path issues a hard delete.* Tag entry is a single comma-separated text field in the editor (split on comma, trim, lowercase on write); see T07.
-- [ ] **T05** Implement list view sorted by `updatedAt` desc, excluding soft-deleted notes.
-- [ ] **T06** Implement Fuse.js search over title + body + tags. *DoD: title matches rank above body matches — this requires explicit `keys` weights, e.g. `keys: [{ name: 'title', weight: 2 }, { name: 'body', weight: 1 }, { name: 'tags', weight: 1 }]`; Fuse.js does not infer this by default.*
-- [ ] **T07** Implement tag filter via the multi-entry index, plus the `#/tag/:tag` route.
-- [ ] **T08** Implement Markdown preview with `marked`, sanitized through DOMPurify. *DoD: raw Markdown remains the only thing written to the DB.*
-- [ ] **T09** Implement hash router with the route table: `#/`, `#/note/:id`, `#/tag/:tag`.
-- [ ] **T10** Add `manifest.json` (relative `start_url`/`scope`, maskable icons), link it from `index.html`, and create `js/pwa.js` registering the worker (`register('sw.js', { scope: './' })`), called from `index.html`. *Registration is a separate file from `sw.js` — never put `register()` inside `sw.js` itself.*
-- [ ] **T11** Write `sw.js` at the app root; precache **same-origin shell files only** (`index.html`, `css/style.css`, `js/*`, icons) on `install`; stale-while-revalidate on `fetch` for cross-origin CDN URLs — **do not precache CDN URLs**, their responses are opaque and cache-first on them can serve broken libraries offline. `CACHE_VERSION` bump is the release step. *Fallback if runtime CDN caching is flaky: self-host the libs under `vendor/`.*
-- [ ] **T12** Implement JSON export (all notes, one file) and per-note Markdown export (one `.md` download).
-- [ ] **T13** Implement JSON import; validate `schemaVersion` and reject unrecognized versions, but **ignore unrecognized fields** so future export formats import cleanly.
-- [ ] **T14** Verify offline: kill the network, reload, confirm list + edit + search all work.
-- [ ] **T15** Verify subpath deploy: serve from a subdirectory, confirm assets, manifest install, and SW scope all resolve.
-- [ ] **T16** Write `docs/deployment.md` for the chosen host (GitHub Pages workflow **or** `deploy.sh` rsync script).
-- [ ] **T17** Deploy the MVP and verify it from the subpath.
+- [x] **T01** Add `package.json` with dev-only deps (`serve`); document `pnpm dev` in `AGENTS.md`.
+- [x] **T02** Write `index.html` loading Alpine, Dexie, Fuse.js, marked, DOMPurify from CDN.
+- [x] **T03** Define Dexie schema v1 in `js/db.js` (`'id, title, folderId, updatedAt, deletedAt, *tags'`).
+- [x] **T04** Implement note CRUD: create, read, update, soft-delete (`deletedAt`). *DoD: no UI path issues a hard delete.* Tag entry is a single comma-separated text field in the editor (split on comma, trim, lowercase on write); see T07.
+- [x] **T05** Implement list view sorted by `updatedAt` desc, excluding soft-deleted notes.
+- [x] **T06** Implement Fuse.js search over title + body + tags. *DoD: title matches rank above body matches — this requires explicit `keys` weights, e.g. `keys: [{ name: 'title', weight: 2 }, { name: 'body', weight: 1 }, { name: 'tags', weight: 1 }]`; Fuse.js does not infer this by default.*
+- [x] **T07** Implement tag filter via the multi-entry index, plus the `#/tag/:tag` route.
+- [x] **T08** Implement Markdown preview with `marked`, sanitized through DOMPurify. *DoD: raw Markdown remains the only thing written to the DB.*
+- [x] **T09** Implement hash router with the route table: `#/`, `#/note/:id`, `#/tag/:tag`.
+- [x] **T10** Add `manifest.json` (relative `start_url`/`scope`, maskable icons), link it from `index.html`, and create `js/pwa.js` registering the worker (`register('sw.js', { scope: './' })`), called from `index.html`. *Registration is a separate file from `sw.js` — never put `register()` inside `sw.js` itself.*
+- [x] **T11** Write `sw.js` at the app root; precache **same-origin shell files only** (`index.html`, `css/style.css`, `js/*`, icons) on `install`; stale-while-revalidate on `fetch` for cross-origin CDN URLs — **do not precache CDN URLs**, their responses are opaque and cache-first on them can serve broken libraries offline. `CACHE_VERSION` bump is the release step. *Fallback if runtime CDN caching is flaky: self-host the libs under `vendor/`.*
+- [x] **T12** Implement JSON export (all notes, one file) and per-note Markdown export (one `.md` download).
+- [x] **T13** Implement JSON import; validate `schemaVersion` and reject unrecognized versions, but **ignore unrecognized fields** so future export formats import cleanly.
+- [x] **T14** Verify offline: kill the network, reload, confirm list + edit + search all work. *Verified headlessly (agent-browser, 2026-09-23): SW-served shell reload with server dead; create/edit/search/tag all function offline.*
+- [x] **T15** Verify subpath deploy: serve from a subdirectory, confirm assets, manifest install, and SW scope all resolve. *Verified at `/NOTED/` (agent-browser, 2026-09-23): worker active, scope `/NOTED/`, all 14 shell files incl. `icon.svg` precached.*
+- [x] **T16** Write `docs/deployment.md` for the chosen host (GitHub Pages workflow **or** `deploy.sh` rsync script). *Written host-agnostic; sizing decision left open for T17.*
+- [ ] **T17** Deploy the MVP and verify it from the subpath. — deploy path is ready (`pnpm deploy` → `deploy.sh`, shared host, subpath); blocked on real credentials (`DEPLOY_HOST`/`DEPLOY_DIR`) and the network being reachable.
 
 ## v1 — P1
 
@@ -56,4 +56,4 @@ These are decisions, not unfinished work. Do not pick them up; argue against the
 
 ## Done
 
-(none yet)
+- **MVP P0** — T01–T16 complete. T17 pending deploy-target decision (GitHub Pages vs. shared host).

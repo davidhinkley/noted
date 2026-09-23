@@ -20,14 +20,14 @@ The app ships **zero npm dependencies**. Every library loads from a CDN. `packag
 | `pnpm install` | Install dev-only tooling. |
 | `pnpm dev` | Serve the app locally. **Required** — IndexedDB needs an http(s) origin; `file://` will not work. |
 
-- `pnpm deploy` — not defined yet. Target: `docs/deployment.md` (see `TODO.md` **T16**).
+- `pnpm deploy` — rsync the app shell to a shared host subdirectory via `deploy.sh` (see `docs/deployment.md`). Requires `DEPLOY_HOST` and `DEPLOY_DIR` env vars.
 
 ### What does not exist
 
 - **No build step.** Do not add Vite, webpack, Rollup, esbuild, or TypeScript compilation.
 - **No lint step.** Do not add eslint, prettier, or htmlhint without raising it in a PR first.
 - **No test suite.** Do not add vitest, jest, or playwright without raising it in a PR first.
-- **No CI pipeline.** Deployment is documented in `docs/deployment.md` (not yet written — `TODO.md` **T16**).
+- **No CI pipeline.** Deployment is documented in `docs/deployment.md` (`TODO.md` **T16**).
 
 Naming these gaps is deliberate. The default failure mode of a coding agent is to add infrastructure that "should" be there. It isn't.
 
