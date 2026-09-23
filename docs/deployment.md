@@ -4,6 +4,8 @@ How to ship NOTED. The source is the artifact — no build step, deployment is a
 
 **Chosen target (T17, 2026-09-23): GitHub Pages (project site) behind a custom subdomain** — `noted.360481025.xyz` maps to `davidhinkley.github.io`. Branch-based publishing from `main`, no Actions workflow, no CI.
 
+**Status (release-ritual verified 2026-09-23):** SW active with scope `https://noted.360481025.xyz/`, cache `noted-v3` holding all 14 shell files, CDN libs runtime-cached, hard-offline create/edit working. *Enforce HTTPS* ticked once the certificate finishes issuing.
+
 ## The release ritual — every release, no exceptions
 
 1. **Bump `CACHE_VERSION` in `sw.js`.** This is the only invalidation mechanism — no content hashes exist without a build step. `activate` deletes every cache that isn't the current version. Forget this and returning users run the old shell forever. (*architecture.md* D6.)
