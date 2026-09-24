@@ -10,6 +10,19 @@ db.version(1).stores({
   notes: 'id, title, folderId, updatedAt, deletedAt, *tags',
 });
 
+// v2 (T24): adds the `folders` table. `folderId` was already reserved on
+// notes in v1 (the creator always sets it), so the backfill only defends
+// records that bypassed the creator — hand-edited or future-dated imports.
+// Any note without a string folderId normalizes to null ("All notes").
+db.version(2).stores({
+  notes: 'id, title, folderId, updatedAt, deletedAt, *tags',
+  folders: 'id, name, updatedAt',
+}).upgrade(async (tx) => {
+  await tx.table('notes').toCollection().modify((note) => {
+    if (typeof note.folderId !== 'string') note.folderId = null;
+  });
+});
+
 function freshTimestamps() {
   const t = Date.now();
   return { createdAt: t, updatedAt: t };
@@ -96,6 +109,66 @@ export function hardDelete(id) {
 /** Everything, including soft-deleted — the lossless backup for export. */
 export function listAllNotes() {
   return db.notes.orderBy('updatedAt').reverse().toArray();
+}
+
+// ---- folders (T24) ----
+
+/** Create a folder. Rejects an empty/whitespace name. */
+export async function createFolder(name) {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) throw new Error('folder name must not be empty');
+  const folder = { id: crypto.randomUUID(), name: trimmed, ...freshTimestamps() };
+  await db.folders.add(folder);
+  return folder;
+}
+
+export function getFolder(id) {
+  return db.folders.get(id);
+}
+
+export async function renameFolder(id, name) {
+  const trimmed = String(name ?? '').trim();
+  if (!trimmed) throw new Error('folder name must not be empty');
+  await db.folders.update(id, { name: trimmed, updatedAt: Date.now() });
+  return db.folders.get(id);
+}
+
+/**
+ * Delete a folder. Its notes are unassigned back to "All notes" — notes are
+ * never deleted by a folder action. One transaction so the two writes cannot
+ * leave orphaned folderId references behind.
+ */
+export async function deleteFolder(id) {
+  await db.transaction('rw', db.notes, db.folders, async () => {
+    await db.notes.where('folderId').equals(id).modify({ folderId: null });
+    await db.folders.delete(id);
+  });
+}
+
+/** All folders, alphabetical. */
+export function listFolders() {
+  return db.folders.orderBy('name').toArray();
+}
+
+/** Live notes in one folder, most recently updated first. */
+export async function listByFolder(folderId) {
+  const notes = await db.notes
+    .where('folderId')
+    .equals(folderId)
+    .filter((n) => n.deletedAt == null)
+    .toArray();
+  notes.sort((a, b) => b.updatedAt - a.updatedAt);
+  return notes;
+}
+
+/** One indexed query: note counts per folder, soft-deleted excluded. */
+export async function folderNoteCounts(ids) {
+  const counts = Object.fromEntries(ids.map((id) => [id, 0]));
+  await db.notes.where('folderId').anyOf(ids).each((n) => {
+    if (n.deletedAt != null) return;
+    counts[n.folderId] = (counts[n.folderId] || 0) + 1;
+  });
+  return counts;
 }
 
 /** Upsert validated notes (import path only). */

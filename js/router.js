@@ -18,6 +18,16 @@ const ROUTES = [
     params: () => ({}),
   },
   {
+    name: 'folder',
+    pattern: /^#\/folder\/([^/]+)\/?$/,
+    params: (m) => ({ id: safeDecode(m[1]) }),
+  },
+  {
+    name: 'folders',
+    pattern: /^#\/folders\/?$/,
+    params: () => ({}),
+  },
+  {
     name: 'settings',
     pattern: /^#\/settings\/?$/,
     params: () => ({}),

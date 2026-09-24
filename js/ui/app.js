@@ -54,6 +54,8 @@ document.addEventListener('alpine:init', () => {
     _saveTimer: null,
     editor: null, // CodeMirror wrapper (ui/editor.js); null outside the note route
     settings: null, // loaded in init(); see ui/settings.js (T23)
+    folders: [], // folder records (T24); loaded on demand for the folders view + editor select
+    folderCounts: {}, // { [folderId]: noteCount } for the folders view
 
     init() {
       this.settings = loadSettings();
@@ -153,15 +155,20 @@ document.addEventListener('alpine:init', () => {
     async loadRoute() {
       if (this.route.name === 'note') {
         await this.openNote(this.route.params.id);
-      } else if (this.route.name === 'settings') {
-        // Settings is a static view; the list index is unnecessary here.
-        this.note = null;
-        this.preview = false;
-      } else {
-        this.note = null;
-        this.preview = false;
-        await this.refreshList();
+        return;
       }
+      this.note = null;
+      this.preview = false;
+      if (this.route.name === 'settings') return;
+      if (this.route.name === 'folders') {
+        await this.refreshFolders();
+        return;
+      }
+      // The folder view's title reads this.folders; the editor select needs it too.
+      if (this.route.name === 'folder' && !this.folders.length) {
+        this.folders = await db.listFolders();
+      }
+      await this.refreshList();
     },
 
     async refreshList() {
@@ -170,8 +177,15 @@ document.addEventListener('alpine:init', () => {
           ? await db.listByTag(this.route.params.tag)
           : this.route.name === 'trash'
             ? await db.listTrashedNotes()
-            : await db.listActiveNotes();
+            : this.route.name === 'folder'
+              ? await db.listByFolder(this.route.params.id)
+              : await db.listActiveNotes();
       buildIndex(this.notes);
+    },
+
+    async refreshFolders() {
+      this.folders = await db.listFolders();
+      this.folderCounts = await db.folderNoteCounts(this.folders.map((f) => f.id));
     },
 
     async openNote(id) {
@@ -181,11 +195,13 @@ document.addEventListener('alpine:init', () => {
         navigate('#/');
         return;
       }
+      if (!this.folders.length) this.folders = await db.listFolders();
       this.note = {
         id: n.id,
         title: n.title,
         body: n.body,
         tagsInput: n.tags.join(', '),
+        folderId: typeof n.folderId === 'string' ? n.folderId : null,
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
       };
@@ -222,6 +238,7 @@ document.addEventListener('alpine:init', () => {
         title,
         body: this.note.body,
         tags: parseTags(this.note.tagsInput),
+        folderId: this.note.folderId || null,
       });
       // The note may have been switched while the write was in flight.
       if (this.note && this.note.id === id) {
@@ -252,6 +269,56 @@ document.addEventListener('alpine:init', () => {
     async restore(id) {
       await db.restoreNote(id);
       await this.refreshList();
+    },
+
+    // ---- folders (T24) ----
+
+    folderTitle() {
+      if (this.route.name !== 'folder') return '';
+      const f = this.folders.find((x) => x.id === this.route.params.id);
+      return f ? f.name : 'Folder';
+    },
+
+    folderCountLabel(id) {
+      const c = this.folderCounts[id] || 0;
+      return `${c} note${c === 1 ? '' : 's'}`;
+    },
+
+    async createFolder() {
+      const name = window.prompt('New folder name:');
+      if (!name || !name.trim()) return;
+      try {
+        await db.createFolder(name);
+      } catch (err) {
+        window.alert(err.message);
+        return;
+      }
+      await this.refreshFolders();
+    },
+
+    async renameFolder(id) {
+      const current = this.folders.find((f) => f.id === id);
+      const name = window.prompt('Rename folder:', current ? current.name : '');
+      if (!name || !name.trim()) return;
+      try {
+        await db.renameFolder(id, name);
+      } catch (err) {
+        window.alert(err.message);
+        return;
+      }
+      await this.refreshFolders();
+    },
+
+    async deleteFolder(id) {
+      const current = this.folders.find((f) => f.id === id);
+      const name = current ? current.name : 'this folder';
+      if (!window.confirm(`Delete "${name}"? Its notes move back to All notes — nothing is lost.`)) return;
+      await db.deleteFolder(id);
+      if (this.route.name === 'folder' && this.route.params.id === id) {
+        navigate('#/folders');
+        return;
+      }
+      await this.refreshFolders();
     },
 
     async purge(id) {

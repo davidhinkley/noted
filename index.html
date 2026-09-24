@@ -62,7 +62,7 @@
   <div id="app" x-data="app" x-cloak>
     <header class="topbar">
       <a class="brand" href="#/">noted</a>
-      <template x-if="route.name !== 'note' && route.name !== 'settings'">
+      <template x-if="route.name !== 'note' && route.name !== 'settings' && route.name !== 'folders'">
         <input class="search" type="search" x-model="query" placeholder="Search notes…" autocomplete="off" title="Search (Ctrl+K)">
       </template>
       <span class="topbar-spacer"></span>
@@ -70,6 +70,7 @@
         <button type="button" class="btn" @click="triggerImport()">Import</button>
         <button type="button" class="btn" @click="exportAll()">Export</button>
         <a class="btn" href="#/trash">Trash</a>
+        <a class="btn" href="#/folders">Folders</a>
         <a class="btn" href="#/settings">Settings</a>
         <button type="button" class="btn primary" title="New note (Ctrl+N)" @click="newNote()">+ New</button>
       </div>
@@ -147,6 +148,64 @@
         </section>
       </template>
 
+      <!-- FOLDER view (T24) -->
+      <template x-if="route.name === 'folder'">
+        <section class="list-view">
+          <h1 class="view-title" x-text="folderTitle()"></h1>
+          <p class="view-sub"><a href="#/folders">← All folders</a></p>
+
+          <div class="empty" x-show="!visibleNotes.length">
+            <span>No notes in this folder.</span>
+          </div>
+
+          <div class="note-list">
+            <template x-for="n in visibleNotes" :key="n.id">
+              <article class="note-card" @click="open(n.id)">
+                <div class="note-card-head">
+                  <span class="note-title" x-text="n.title || 'Untitled'"></span>
+                  <time class="note-date" x-text="fmtDate(n.updatedAt)"></time>
+                </div>
+                <p class="note-excerpt" x-text="excerpt(n.body)"></p>
+                <div class="note-tags" x-show="n.tags.length">
+                  <template x-for="t in n.tags" :key="t">
+                    <a
+                      class="tag-chip"
+                      :href="'#/tag/' + encodeURIComponent(t)"
+                      @click.stop
+                      x-text="'#' + t"
+                    ></a>
+                  </template>
+                </div>
+              </article>
+            </template>
+          </div>
+        </section>
+      </template>
+
+      <!-- FOLDERS view (T24) -->
+      <template x-if="route.name === 'folders'">
+        <section class="list-view">
+          <h1 class="view-title">Folders</h1>
+          <p class="view-sub"><a href="#/">← Back to notes</a></p>
+
+          <div class="folders">
+            <template x-for="f in folders" :key="f.id">
+              <div class="folder-row">
+                <a class="folder-name" :href="'#/folder/' + f.id" x-text="f.name"></a>
+                <span class="folder-count" x-text="folderCountLabel(f.id)"></span>
+                <span class="folder-row-actions">
+                  <button type="button" class="btn tiny" @click="renameFolder(f.id)">Rename</button>
+                  <button type="button" class="btn tiny danger" @click="deleteFolder(f.id)">Delete</button>
+                </span>
+              </div>
+            </template>
+            <p class="view-sub" x-show="!folders.length">No folders yet — create one below.</p>
+          </div>
+
+          <button type="button" class="btn" @click="createFolder()">+ New folder</button>
+        </section>
+      </template>
+
       <!-- SETTINGS view (T23) -->
       <template x-if="route.name === 'settings'">
         <section class="list-view">
@@ -209,6 +268,18 @@
             placeholder="tags, separated, by, commas"
             autocomplete="off"
           >
+          <select
+            class="folder-select"
+            x-model="note.folderId"
+            @change="touch()"
+            title="Folder"
+            x-show="folders.length"
+          >
+            <option value="">No folder</option>
+            <template x-for="f in folders" :key="f.id">
+              <option :value="f.id" x-text="f.name"></option>
+            </template>
+          </select>
 
           <div class="editor-body">
             <div class="cm-host" x-show="!preview" x-init="mountEditor($el)"></div>

@@ -62,17 +62,29 @@ Full rationale for each is in **Decisions** at the end of this file.
 
 ## 5. Data model
 
-### Dexie schema (v1)
+### Dexie schema (v1 → v2)
 
 ```js
 db.version(1).stores({
   notes: 'id, title, folderId, updatedAt, deletedAt, *tags'
+});
+
+db.version(2).stores({
+  notes: 'id, title, folderId, updatedAt, deletedAt, *tags',
+  folders: 'id, name, updatedAt'
+}).upgrade(async (tx) => {
+  // Backfill (T24): normalize notes that bypassed the creator
+  // (hand-edited / future-dated imports) to folderId: null.
+  await tx.table('notes').toCollection().modify((note) => {
+    if (typeof note.folderId !== 'string') note.folderId = null;
+  });
 });
 ```
 
 - `id` is the primary key. It is **not** auto-increment — records carry client-generated UUIDv4.
 - `*tags` is a multi-entry index, enabling `where('tags').equals('foo')` without scanning.
 - `deletedAt` is indexed so the list query can exclude soft-deleted rows cheaply.
+- `folders` is new in v2 (T24); `folderId` was already reserved and indexed on notes in v1, so the schema change is additive and no note rows move.
 
 ### Note record
 
@@ -87,6 +99,17 @@ db.version(1).stores({
 | `updatedAt` | number (ms) | Bumped on every write. |
 | `deletedAt` | number \| null | Soft delete. Set, never removed except by *restore*. |
 | `attachments` | string[] | **Reserved.** References future attachment IDs. Always `[]` in MVP. |
+
+### Folder record
+
+| Field | Type | Purpose / constraint |
+| --- | --- | --- |
+| `id` | string (UUIDv4) | Primary key. Client-generated. |
+| `name` | string | Display. Trimmed and non-empty on write. |
+| `createdAt` | number (ms) | Immutable after creation. |
+| `updatedAt` | number (ms) | Bumped on rename. |
+
+Deleting a folder **unassigns** its notes back to "All notes" (`folderId: null`) in the same transaction — folders are organizational metadata, notes are content, so a folder action never deletes notes. Folders themselves have no trash; list/rename/delete live behind the `#/folders` view.
 
 ### Why this shape
 
@@ -119,6 +142,8 @@ db.version(1).stores({
 | `#/note/:id` | Editor + Markdown preview |
 | `#/tag/:tag` | List filtered to one tag |
 | `#/trash` | Soft-deleted notes — **v1** (T21), not MVP |
+| `#/folder/:id` | List filtered to one folder — **v1** (T24) |
+| `#/folders` | Folder management (create/rename/delete) — **v1** (T24) |
 
 Everything after the `#` is invisible to a static server, so no rewrite rules, no `404.html` hack, and no host-specific configuration. The cost is uglier URLs; the trade is that the app works on any static host unchanged. See D3.
 
