@@ -65,6 +65,7 @@
       <template x-if="route.name !== 'note' && route.name !== 'settings' && route.name !== 'folders'">
         <input class="search" type="search" x-model="query" placeholder="Search notes…" autocomplete="off" title="Search (Ctrl+K)">
       </template>
+      <span class="offline-badge" x-show="!online" title="Offline — your notes are still saved locally">Offline</span>
       <span class="topbar-spacer"></span>
       <div class="topbar-actions">
         <button type="button" class="btn" @click="triggerImport()">Import</button>
@@ -225,9 +226,9 @@
             <label class="settings-row">
               <span>Editor font size</span>
               <select x-model="settings.editorFontSize" @change="applySettings()">
-                <option :value="13">Small (13px)</option>
-                <option :value="15">Normal (15px)</option>
-                <option :value="17">Large (17px)</option>
+                <option value="13">Small (13px)</option>
+                <option value="15">Normal (15px)</option>
+                <option value="17">Large (17px)</option>
               </select>
             </label>
 
@@ -238,6 +239,16 @@
                 <option value="preview">Preview mode</option>
               </select>
             </label>
+
+            <div class="settings-row" x-show="storageUsage">
+              <span>Storage used</span>
+              <span class="settings-value">
+                <template x-if="storageUsage">
+                  <span x-text="formatBytes(storageUsage.usage) + ' of ' + formatBytes(storageUsage.quota)"></span>
+                </template>
+                <template x-if="!storageUsage"><span>navigator.storage.estimate() unavailable</span></template>
+              </span>
+            </div>
           </div>
         </section>
       </template>

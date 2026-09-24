@@ -12,7 +12,7 @@ export const STORAGE_KEY = 'noted.settings';
 
 export const DEFAULT_SETTINGS = {
   theme: 'system',
-  editorFontSize: 15,
+  editorFontSize: '15',
   defaultPreview: 'edit',
 };
 
@@ -26,7 +26,7 @@ export function loadSettings() {
       s.theme = raw.theme;
     }
     if (FONT_SIZES.includes(Number(raw.editorFontSize))) {
-      s.editorFontSize = Number(raw.editorFontSize);
+      s.editorFontSize = String(Number(raw.editorFontSize));
     }
     if (raw.defaultPreview === 'edit' || raw.defaultPreview === 'preview') {
       s.defaultPreview = raw.defaultPreview;

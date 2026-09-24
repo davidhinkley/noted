@@ -187,7 +187,7 @@ Host-specific commands live in `docs/deployment.md` (not yet written — `TODO.m
 ## 11. Limits and non-functional concerns
 
 - **Search scale.** Fuse.js is fast to roughly 2,000–5,000 notes. Past that, move index building into a Web Worker (T33).
-- **Storage quota.** IndexedDB offers ~1GB+ typically, but browsers can evict it under disk pressure. Export/import is the backup story, not a nice-to-have.
+- **Storage quota.** IndexedDB offers ~1GB typically per origin (browsers report more, e.g. 8GB in Chromium), but browsers can evict it under disk pressure. Since T25 the settings view surfaces `navigator.storage.estimate()` as a read-only "% of quota" row so the user can see runway; export/import is the backup story, not a nice-to-have. The topbar also shows an **Offline** badge while `navigator.onLine` is false — offline is the core promise, so the state is never silent.
 - **No `file://` support.** IndexedDB requires a secure context (`http(s)` or `localhost`). Use `pnpm dev`.
 - **Browser support.** Evergreen browsers only: IndexedDB, service workers, ES modules.
 - **Accessibility and keyboard navigation** are v1 (T22), not MVP. This is a deliberate deferral, not an oversight: the MVP exists to validate the storage boundary, routing, and offline story before the surface grows. That said, for a text-heavy app keyboard navigation is arguably core rather than polish — T22 should be treated as early-v1, not late-v1, and must not slip past it.

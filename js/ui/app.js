@@ -56,6 +56,8 @@ document.addEventListener('alpine:init', () => {
     settings: null, // loaded in init(); see ui/settings.js (T23)
     folders: [], // folder records (T24); loaded on demand for the folders view + editor select
     folderCounts: {}, // { [folderId]: noteCount } for the folders view
+    online: navigator.onLine, // net indicator (T25); updated by window events
+    storageUsage: null, // { usage, quota } bytes from navigator.storage.estimate() (T25)
 
     init() {
       this.settings = loadSettings();
@@ -74,6 +76,8 @@ document.addEventListener('alpine:init', () => {
         await this.loadRoute();
       });
       document.addEventListener('keydown', (e) => this.onKeydown(e));
+      window.addEventListener('online', () => (this.online = true));
+      window.addEventListener('offline', () => (this.online = false));
     },
 
     // The editor is swappable (AGENTS.md). This is where the CodeMirror wrapper
@@ -137,13 +141,37 @@ document.addEventListener('alpine:init', () => {
     applySettings() {
       const s = this.settings;
       if (!['light', 'dark', 'system'].includes(s.theme)) s.theme = DEFAULT_SETTINGS.theme;
-      s.editorFontSize = FONT_SIZES.includes(Number(s.editorFontSize)) ? Number(s.editorFontSize) : DEFAULT_SETTINGS.editorFontSize;
+      s.editorFontSize = FONT_SIZES.includes(Number(s.editorFontSize))
+        ? String(Number(s.editorFontSize))
+        : DEFAULT_SETTINGS.editorFontSize;
       if (s.defaultPreview !== 'edit' && s.defaultPreview !== 'preview') {
         s.defaultPreview = DEFAULT_SETTINGS.defaultPreview;
       }
       this.settings = { ...s };
       applySettings(this.settings);
       saveSettings(this.settings);
+    },
+
+    // Storage estimate (T25). Read-only — surfaces navigator.storage.estimate
+    // in the settings view so users see how close they are to the quota.
+    async loadStorageInfo() {
+      try {
+        if (!navigator.storage?.estimate) {
+          this.storageUsage = null;
+          return;
+        }
+        this.storageUsage = await navigator.storage.estimate();
+      } catch {
+        this.storageUsage = null;
+      }
+    },
+
+    formatBytes(bytes) {
+      if (!Number.isFinite(bytes) || bytes < 0) return '—';
+      if (bytes >= 1 << 30) return `${(bytes / (1 << 30)).toFixed(1)} GB`;
+      if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`;
+      if (bytes >= 1 << 10) return `${(bytes / (1 << 10)).toFixed(1)} KB`;
+      return `${Math.round(bytes)} B`;
     },
 
     get rendered() {
@@ -159,7 +187,10 @@ document.addEventListener('alpine:init', () => {
       }
       this.note = null;
       this.preview = false;
-      if (this.route.name === 'settings') return;
+      if (this.route.name === 'settings') {
+        await this.loadStorageInfo();
+        return;
+      }
       if (this.route.name === 'folders') {
         await this.refreshFolders();
         return;
