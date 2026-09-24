@@ -62,7 +62,7 @@ Full rationale for each is in **Decisions** at the end of this file.
 
 ## 5. Data model
 
-### Dexie schema (v1 → v2)
+### Dexie schema (v1 → v2 → v3)
 
 ```js
 db.version(1).stores({
@@ -79,12 +79,23 @@ db.version(2).stores({
     if (typeof note.folderId !== 'string') note.folderId = null;
   });
 });
+
+db.version(3).stores({
+  notes: 'id, title, folderId, updatedAt, deletedAt, pinned, *tags',
+  folders: 'id, name, updatedAt'
+}).upgrade(async (tx) => {
+  // Backfill (T26): notes that predate pinning default to unpinned.
+  await tx.table('notes').toCollection().modify((note) => {
+    if (typeof note.pinned !== 'boolean') note.pinned = false;
+  });
+});
 ```
 
 - `id` is the primary key. It is **not** auto-increment — records carry client-generated UUIDv4.
 - `*tags` is a multi-entry index, enabling `where('tags').equals('foo')` without scanning.
 - `deletedAt` is indexed so the list query can exclude soft-deleted rows cheaply.
 - `folders` is new in v2 (T24); `folderId` was already reserved and indexed on notes in v1, so the schema change is additive and no note rows move.
+- `pinned` is new in v3 (T26): a boolean flag, indexed for future queries. List queries order pinned-first as a base, and the UI's sort control re-sorts client-side (a dedicated "Pinned first" option reproduces the pinned ordering explicitly).
 
 ### Note record
 
@@ -95,6 +106,7 @@ db.version(2).stores({
 | `body` | string | **Raw Markdown.** Opaque at the storage boundary. |
 | `tags` | string[] | Multi-entry index. Lowercased on write. |
 | `folderId` | string \| null | Optional grouping. A `folders` table arrives in Dexie v2 (T24). |
+| `pinned` | boolean | Pin to top. Arrives in Dexie v3 (T26); backfilled `false`. Import preserves it (`normalize` keeps `pinned === true`). |
 | `createdAt` | number (ms) | Immutable after creation. |
 | `updatedAt` | number (ms) | Bumped on every write. |
 | `deletedAt` | number \| null | Soft delete. Set, never removed except by *restore*. |
@@ -284,6 +296,14 @@ An inlined decision log. Same format as an ADR, just not yet split into files.
 - **Decision:** Persist settings in localStorage under a single key `noted.settings`, validated on load (unknown values fall back to defaults; unknown *keys* are ignored, the same forward-compat stance as import). Note data stays exclusively in Dexie.
 - **Rationale:** Settings are trivial, non-relational, and browser-local; a Dexie table for three scalars is overhead, and settings must survive a note-store reset (or a future encryption passphrase change) without being entangled with note data. localStorage's 5MB cap and synchronous API are irrelevant at this size.
 - **Consequences:** The one sanctioned exception to "Dexie only." Any new localStorage key needs a decision entry here first. Settings are never part of export/import — they are device preferences, not content.
+
+### D10. Bulk zip export via JSZip `+esm`, not a pinned dist URL
+- **Status:** accepted
+- **Date:** 2026-09-24
+- **Context:** T26 needs client-side zip creation. JSZip ships a UMD `dist` bundle with no ESM exports, so a pinned dist URL in the import map would resolve `default` to `undefined`.
+- **Decision:** Map `jszip` to jsdelivr's `+esm` build (`https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm`) and resolve defensively (`mod.default ?? mod.JSZip ?? window.JSZip`, throw if missing).
+- **Rationale — why this doesn't violate D8:** D8 bans `+esm` for CodeMirror because its packages share module *instances* across bare imports. JSZip's dist bundle is self-contained (no bare imports), so the `+esm` wrapper is a single re-export with no duplication hazard. Hand-pinning the UMD file would look consistent but be silently broken.
+- **Consequences:** `exportMarkdownZip` stays lazy-loadable and offline-tolerant (runtime-cached like all CDN URLs); a load failure surfaces as an alert, never a silent no-op.
 
 ### Split trigger
 

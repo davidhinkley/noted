@@ -23,6 +23,16 @@ db.version(2).stores({
   });
 });
 
+// v3 (T26): adds `pinned` boolean to notes. Default false for existing notes.
+db.version(3).stores({
+  notes: 'id, title, folderId, updatedAt, deletedAt, pinned, *tags',
+  folders: 'id, name, updatedAt',
+}).upgrade(async (tx) => {
+  await tx.table('notes').toCollection().modify((note) => {
+    if (typeof note.pinned !== 'boolean') note.pinned = false;
+  });
+});
+
 function freshTimestamps() {
   const t = Date.now();
   return { createdAt: t, updatedAt: t };
@@ -37,6 +47,7 @@ export async function createNote(partial = {}) {
     tags: [],
     folderId: null,
     deletedAt: null,
+    pinned: false,
     attachments: [],
     ...partial,
     ...freshTimestamps(),
@@ -64,33 +75,43 @@ export function softDelete(id) {
   return updateNote(id, { deletedAt: Date.now() });
 }
 
-/** All live notes, most recently updated first. */
+/** Toggle the pinned flag. Bumps updatedAt. */
+export function togglePin(id) {
+  return db.notes.get(id).then((n) => {
+    if (!n) return Promise.reject(new Error('note not found'));
+    return updateNote(id, { pinned: !n.pinned });
+  });
+}
+
+/** All live notes, most recently updated first; pinned first. */
 export function listActiveNotes() {
   return db.notes
     .orderBy('updatedAt')
     .reverse()
     .filter((n) => n.deletedAt == null)
-    .toArray();
+    .toArray()
+    .then((notes) => notes.sort((a, b) => (b.pinned === a.pinned ? b.updatedAt - a.updatedAt : (b.pinned ? 1 : -1))));
 }
 
-/** Live notes carrying one tag, most recently updated first. */
+/** Live notes carrying one tag, most recently updated first; pinned first. */
 export async function listByTag(tag) {
   const notes = await db.notes
     .where('tags')
     .equals(tag)
     .filter((n) => n.deletedAt == null)
     .toArray();
-  notes.sort((a, b) => b.updatedAt - a.updatedAt);
+  notes.sort((a, b) => (b.pinned === a.pinned ? b.updatedAt - a.updatedAt : (b.pinned ? 1 : -1)));
   return notes;
 }
 
-/** Soft-deleted notes only, most recently updated first. */
+/** Soft-deleted notes only, most recently updated first; pinned first. */
 export function listTrashedNotes() {
   return db.notes
     .orderBy('updatedAt')
     .reverse()
     .filter((n) => n.deletedAt != null)
-    .toArray();
+    .toArray()
+    .then((notes) => notes.sort((a, b) => (b.pinned === a.pinned ? b.updatedAt - a.updatedAt : (b.pinned ? 1 : -1))));
 }
 
 /** Restore: the only sanctioned way to clear deletedAt. Bumps updatedAt. */
@@ -150,14 +171,14 @@ export function listFolders() {
   return db.folders.orderBy('name').toArray();
 }
 
-/** Live notes in one folder, most recently updated first. */
+/** Live notes in one folder, most recently updated first; pinned first. */
 export async function listByFolder(folderId) {
   const notes = await db.notes
     .where('folderId')
     .equals(folderId)
     .filter((n) => n.deletedAt == null)
     .toArray();
-  notes.sort((a, b) => b.updatedAt - a.updatedAt);
+  notes.sort((a, b) => (b.pinned === a.pinned ? b.updatedAt - a.updatedAt : (b.pinned ? 1 : -1)));
   return notes;
 }
 

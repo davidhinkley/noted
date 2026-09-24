@@ -32,7 +32,7 @@ A shippable local-first Markdown notes app.
 - [x] **T23** Add settings persisted to localStorage (theme, font size, default preview state). *The only sanctioned localStorage use — settings, never note data.* Verified (agent-browser, 2026-09-24): single `noted.settings` key, validated on load; theme switch flips `data-theme` (+ `prefers-color-scheme` fallback), font size drives `--editor-font-size`, default preview makes `#/note/:id` open in preview; `#/settings` route + view.
 - [x] **T24** Add folders: new `folders` table via Dexie v2 with a migration backfill. *Verified (agent-browser, 2026-09-24): create → assign via the editor select → `#/folder/:id` listing with live counts → rename → delete unassigns notes back to All notes (single transaction); backfill normalizes missing `note.folderId` to null.*
 - [x] **T25** Add offline/online indicator and an IndexedDB storage-usage estimate. *Verified (agent-browser, 2026-09-24): topbar "Offline" badge driven by `navigator.onLine` + `online`/`offline` events (dispatch tests both ways); settings shows `navigator.storage.estimate()` usage ("0 B of 8.0 GB"); read-only, no schema change.*
-- [ ] **T26** Add note pinning and sort options; add bulk Markdown export as a zip (requires a CDN zip dependency).
+- [x] **T26** Add note pinning and sort options; add bulk Markdown export as a zip (requires a CDN zip dependency). *Verified (agent-browser, 2026-09-24): pin toggle flips `pinned` + button to "Unpin" and the note jumps to top; all 7 sorts cycled with model↔DOM in sync; "Export .zip" downloads one correctly-slugged `.md` per note via the JSZip `+esm` import-map entry; Dexie v3 backfills `pinned: false`.*
 
 ## Later — P2
 
@@ -57,4 +57,4 @@ These are decisions, not unfinished work. Do not pick them up; argue against the
 ## Done
 
 - **MVP P0** — T01–T17 complete. Deployed to `noted.360481025.xyz` (GitHub Pages).
-- **v1** — T20 (CodeMirror 6 editor), T21 (trash view), T22 (keyboard shortcuts), T23 (settings), T24 (folders, v1→v2 migration), T25 (offline indicator + storage estimate). Next: T26 (pinning, sort, bulk Markdown zip).
+- **v1** — T20 (CodeMirror 6 editor), T21 (trash view), T22 (keyboard shortcuts), T23 (settings), T24 (folders, v1→v2 migration), T25 (offline indicator + storage estimate), T26 (pinning, sort options, bulk Markdown zip — Dexie v3). **v1 complete.** Next: P2 queue (T30–T35).

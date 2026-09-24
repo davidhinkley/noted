@@ -55,6 +55,7 @@ function normalize(raw) {
       ? [...new Set(raw.tags.map((t) => String(t).trim().toLowerCase()).filter((t) => /[a-z0-9]/.test(t)))]
       : [],
     folderId: typeof raw.folderId === 'string' ? raw.folderId : null,
+    pinned: raw.pinned === true,
     createdAt: isNum(raw.createdAt) ? raw.createdAt : now,
     updatedAt: isNum(raw.updatedAt) ? raw.updatedAt : now,
     deletedAt: isNum(raw.deletedAt) ? raw.deletedAt : null,

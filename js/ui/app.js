@@ -9,7 +9,7 @@ import Alpine from 'https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/module.esm
 import * as db from '../db.js';
 import { buildIndex, search } from '../search.js';
 import { startRouter, navigate } from '../router.js';
-import { exportJSON, exportMarkdown } from '../io/export.js';
+import { exportJSON, exportMarkdown, exportMarkdownZip } from '../io/export.js';
 import { importJSON } from '../io/import.js';
 import { createMarkdownEditor } from './editor.js';
 import { loadSettings, saveSettings, applySettings, DEFAULT_SETTINGS, FONT_SIZES } from './settings.js';
@@ -58,6 +58,16 @@ document.addEventListener('alpine:init', () => {
     folderCounts: {}, // { [folderId]: noteCount } for the folders view
     online: navigator.onLine, // net indicator (T25); updated by window events
     storageUsage: null, // { usage, quota } bytes from navigator.storage.estimate() (T25)
+    sortBy: 'updatedAt-desc', // T26: sort options
+    sortOptions: [
+      { value: 'updatedAt-desc', label: 'Updated ↓' },
+      { value: 'updatedAt-asc', label: 'Updated ↑' },
+      { value: 'createdAt-desc', label: 'Created ↓' },
+      { value: 'createdAt-asc', label: 'Created ↑' },
+      { value: 'title-asc', label: 'Title A–Z' },
+      { value: 'title-desc', label: 'Title Z–A' },
+      { value: 'pinned-first', label: 'Pinned first' },
+    ],
 
     init() {
       this.settings = loadSettings();
@@ -126,10 +136,37 @@ document.addEventListener('alpine:init', () => {
       // effect subscribes to list changes, not just to the search input.
       // Fuse holds its own snapshot; without this dependency the list would
       // keep showing stale cards after a route change while a query is active.
-      const notes = this.notes;
-      if (!q) return notes;
-      const results = search(q);
-      return results ? results.map((r) => r.item) : [];
+      let notes = this.notes;
+      if (q) {
+        const results = search(q);
+        notes = results ? results.map((r) => r.item) : [];
+      }
+      // Apply sort (T26)
+      switch (this.sortBy) {
+        case 'updatedAt-asc':
+          notes = [...notes].sort((a, b) => a.updatedAt - b.updatedAt);
+          break;
+        case 'createdAt-desc':
+          notes = [...notes].sort((a, b) => b.createdAt - a.createdAt);
+          break;
+        case 'createdAt-asc':
+          notes = [...notes].sort((a, b) => a.createdAt - b.createdAt);
+          break;
+        case 'title-asc':
+          notes = [...notes].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+          break;
+        case 'title-desc':
+          notes = [...notes].sort((a, b) => (b.title || '').localeCompare(a.title || ''));
+          break;
+        case 'pinned-first':
+          notes = [...notes].sort((a, b) => (b.pinned === a.pinned ? b.updatedAt - a.updatedAt : (b.pinned ? 1 : -1)));
+          break;
+        case 'updatedAt-desc':
+        default:
+          notes = [...notes].sort((a, b) => b.updatedAt - a.updatedAt);
+          break;
+      }
+      return notes;
     },
 
     get saveLabel() {
@@ -350,6 +387,19 @@ document.addEventListener('alpine:init', () => {
         return;
       }
       await this.refreshFolders();
+    },
+
+    async togglePin(id) {
+      await db.togglePin(id);
+      await this.refreshList();
+    },
+
+    async exportZip() {
+      try {
+        await exportMarkdownZip(await db.listActiveNotes());
+      } catch (err) {
+        window.alert(`Zip export failed: ${err.message}`);
+      }
     },
 
     async purge(id) {

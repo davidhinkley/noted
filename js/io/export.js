@@ -45,3 +45,33 @@ export function exportMarkdown(note) {
   const text = title && !body.startsWith('#') ? `# ${title}\n\n${body}` : body;
   download(`${slug(title)}.md`, text, 'text/markdown');
 }
+
+/**
+ * All live notes → one .zip with individual .md files (T26).
+ * JSZip arrives as an ES module through the import map (`+esm` build —
+ * the dist UMD bundle has no ESM exports, so a bare dist URL would
+ * resolve `default` to undefined).
+ */
+export async function exportMarkdownZip(notes) {
+  const mod = await import('jszip');
+  const JSZip = mod.default ?? mod.JSZip ?? window.JSZip;
+  if (!JSZip) throw new Error('zip library failed to load');
+  const zip = new JSZip();
+  const used = new Set();
+  for (const n of notes) {
+    const title = (n.title || '').trim() || 'Untitled';
+    const body = n.body || '';
+    const text = title && !body.startsWith('#') ? `# ${title}\n\n${body}` : body;
+    let fname = `${slug(title)}.md`;
+    for (let i = 1; used.has(fname); i += 1) fname = `${slug(title)}-${i}.md`;
+    used.add(fname);
+    zip.file(fname, text);
+  }
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `noted-md-${stamp()}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
