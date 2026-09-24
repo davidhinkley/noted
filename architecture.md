@@ -14,7 +14,7 @@ The original brief is preserved as `NOTED_plan.md` (read-only reference; it is t
 2. **Buildless.** No compiler, no bundler, no transpilation. Source files are the shipped files. This is a deliberate constraint, not a limitation — see D2 and *Migration triggers*.
 3. **Static-hostable.** The artifact is a directory of static files with no server-side requirements.
 4. **Content is opaque.** Note bodies are uninterpreted bytes at the storage boundary. The DB layer never parses them. This is what keeps encryption and format changes possible later without a rewrite.
-5. **Editor is swappable.** The editor is a UI component, not an architecture decision. `body` is raw Markdown; any editor can produce it.
+5. **Editor is swappable.** The editor is a UI component, not an architecture decision. Today it is a CodeMirror 6 view behind `js/ui/editor.js` (D8); `body` is raw Markdown, so any editor can produce it.
 6. **Subdirectory-relative by default.** Paths resolve relative to the app directory so the same build works at `/`, `/notes/`, or `/<repo>/`.
 
 ## 3. System overview
@@ -103,6 +103,8 @@ db.version(1).stores({
 | `js/search.js` | Building and querying the Fuse index | Never write to the DB. |
 | `js/router.js` | Hash parsing, route table, view switching | Never contain view logic. |
 | `js/ui/*` | Alpine components, rendering, events | Never issue raw IndexedDB calls — go through `db.js`. |
+| `js/ui/editor.js` | The CodeMirror 6 wrapper; owns editor lifecycle (`createMarkdownEditor`) | Never touch storage or rendering — hands raw Markdown to the app via `onDocChange`. The only module allowed to import CodeMirror. |
+| `js/ui/settings.js` | App settings (theme, editor font size, default preview) in the single `noted.settings` localStorage key | Never store note data — localStorage is settings-only (see `TODO.md` T23). Never touch the DOM directly except `data-theme` / one CSS var via `applySettings`. |
 | `js/pwa.js` | Service-worker registration | Never contain cache logic (that lives in `sw.js`). |
 | `js/io/*` | Serialization and import validation | Never mutate notes directly — hand results to `db.js`. |
 | `sw.js` | Fetch interception, cache strategy, invalidation | Never reach into IndexedDB. |
@@ -134,7 +136,7 @@ Without a service worker, "runs in the browser" is false advertising: offline, t
   ```
 - **Strategy:** precache **same-origin shell files only** on `install` (`index.html`, `css/style.css`, `js/*`, icons); serve them cache-first. Handle CDN library URLs **opportunistically** — stale-while-revalidate on `fetch`, network falling back to cache, never precached on `install`.
   - *Why the split:* CDN responses are **cross-origin and opaque**. You cannot read their status, and cache-first on an opaque response can serve a broken library offline — a known footgun that costs a day to debug. Same-origin precache is safe; cross-origin belongs in the runtime path where a network failure degrades gracefully.
-  - *Fallback:* if runtime CDN caching proves flaky, self-host the five libraries under `vendor/` (same-origin, precacheable). Not needed yet.
+  - *Fallback:* if runtime CDN caching proves flaky, self-host the CDN libraries under `vendor/` (same-origin, precacheable). Not needed yet.
 - **Invalidation:** there is no content hashing without a build step, so a `CACHE_VERSION` constant in `sw.js` is the release mechanism — bump it, and `activate` deletes the old cache. **Every release must bump it.**
 
 ## 9. Data portability and security
@@ -172,7 +174,6 @@ Host-specific commands live in `docs/deployment.md` (not yet written — `TODO.m
 | End-to-end encryption | UX burden (passphrase, unrecoverable data) and key migration for existing notes | `body` is opaque at the boundary; encrypt/decrypt wraps Dexie only |
 | Attachments / binary files | Blob storage, upload/download UI, size limits, export complexity | `attachments: []` reserved; separate store or OPFS, never blobs in `notes` |
 | Cross-device sync | Conflict resolution, auth, a server — the hardest local-first problem | UUIDv4 IDs, `createdAt`/`updatedAt`, soft deletes |
-| CodeMirror 6 editor | Polish; a textarea validates the data model first | `body` is raw Markdown; editor is a swappable component |
 | Clean URLs | Host-specific `404.html` coupling | Hash routing |
 | Bulk Markdown export (zip) | Needs a second CDN dependency before it is proven necessary | JSON export is lossless; per-note `.md` covers the common case |
 | Lint / tests / CI | Premature tooling on an unvalidated product | `package.json` dev-deps only; `AGENTS.md` names the gaps explicitly |
@@ -182,7 +183,7 @@ Host-specific commands live in `docs/deployment.md` (not yet written — `TODO.m
 The buildless Alpine approach is a starting bet, not a life sentence. Migrate to Vue 3 or Svelte + Vite when **any** of these is true:
 
 - An Alpine component exceeds roughly 200 lines of `x-` directives and becomes unreadable.
-- You need more than two third-party UI libraries that have no CDN build.
+- You need more than two third-party UI libraries that have **no CDN build** (an ESM-with-import-map counts as a CDN build — CodeMirror 6 ships this way, see D8, and does **not** trip this trigger).
 - You need real lint, typecheck, or test tooling integrated into the workflow.
 - The un-bundled CDN payload measurably hurts first load.
 
@@ -242,6 +243,22 @@ An inlined decision log. Same format as an ADR, just not yet split into files.
 - **Context:** Target hosts include GitHub Pages project sites and shared hosting, both of which may serve under a path.
 - **Decision:** No leading slashes in same-origin paths; no `<base>` tag; resolve service-worker URLs against `self.registration.scope`.
 - **Consequences:** Works at `/`, `/notes/`, and `/<repo>/` with no per-target edits. The trade is that relative paths in JavaScript must be written carefully.
+
+### D8. Editor: CodeMirror 6 via a pinned import map, behind `js/ui/editor.js`
+- **Status:** accepted
+- **Date:** 2026-09-23
+- **Context:** The MVP shipped a `<textarea>` to validate the storage boundary before the surface grew. That is done (T01–T17); a notes app now needs real editing. CodeMirror 6 is ESM-first with dozens of small packages and **no single-file CDN build**.
+- **Decision:** Replace the textarea with CodeMirror 6 Markdown mode. Ship it as ES modules via an `<script type="importmap">` in `index.html` that pins every bare specifier in the `@codemirror/*` + `@lezer/*` graph (21 packages, all resolved versions) so each package has exactly one shared module instance. All CodeMirror imports stay confined to `js/ui/editor.js`, which exposes a tiny surface — `createMarkdownEditor(parent, { getDoc, onDocChange }) → { view, setDoc, destroy }` — so the editor remains swappable and the rest of the app sees only raw Markdown strings.
+- **Rationale — why not jsdelivr's `/+esm` bundles:** `/+esm` rewrites bare imports into independent bundle URLs. Each bundle would re-import its dependencies separately, giving the browser *multiple module instances* of `@codemirror/state` etc. CodeMirror's view and state identify themselves by instance; duplicated instances silently break editor behavior. A hand-pinned import map forces one instance per package and, bonus, makes the exact delivered versions auditable in `index.html`.
+- **Consequences:** Any future CodeMirror dependency must add its exact version to the import map in the same commit (derive it from the graph: fetch each package's own imports). The SW's offline guarantee now depends on 21 runtime-cached cross-origin URLs (stale-while-revalidate, same as before). Bumping CodeMirror means bumping several pinned versions together — not a per-release chore. The editor is still swappable: swap `js/ui/editor.js` for another provider and nothing else changes.
+
+### D9. Settings in localStorage, behind `js/ui/settings.js`
+- **Status:** accepted
+- **Date:** 2026-09-24
+- **Context:** T23 adds user settings (theme, editor font size, default preview state). AGENTS.md forbids a second storage layer without a recorded decision.
+- **Decision:** Persist settings in localStorage under a single key `noted.settings`, validated on load (unknown values fall back to defaults; unknown *keys* are ignored, the same forward-compat stance as import). Note data stays exclusively in Dexie.
+- **Rationale:** Settings are trivial, non-relational, and browser-local; a Dexie table for three scalars is overhead, and settings must survive a note-store reset (or a future encryption passphrase change) without being entangled with note data. localStorage's 5MB cap and synchronous API are irrelevant at this size.
+- **Consequences:** The one sanctioned exception to "Dexie only." Any new localStorage key needs a decision entry here first. Settings are never part of export/import — they are device preferences, not content.
 
 ### Split trigger
 

@@ -11,6 +11,8 @@ import { buildIndex, search } from '../search.js';
 import { startRouter, navigate } from '../router.js';
 import { exportJSON, exportMarkdown } from '../io/export.js';
 import { importJSON } from '../io/import.js';
+import { createMarkdownEditor } from './editor.js';
+import { loadSettings, saveSettings, applySettings, DEFAULT_SETTINGS, FONT_SIZES } from './settings.js';
 
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -50,18 +52,41 @@ document.addEventListener('alpine:init', () => {
     preview: false,
     saveState: 'saved', // 'saved' | 'dirty' | 'saving'
     _saveTimer: null,
+    editor: null, // CodeMirror wrapper (ui/editor.js); null outside the note route
+    settings: null, // loaded in init(); see ui/settings.js (T23)
 
     init() {
+      this.settings = loadSettings();
+      applySettings(this.settings);
       startRouter(async (route) => {
         // Flush pending edits before leaving the editor.
         if (this.route.name === 'note' && route.name !== 'note') {
           await this.saveNow();
+        }
+        if (route.name !== 'note' && this.editor) {
+          this.editor.destroy();
+          this.editor = null;
         }
         if (route.name === 'note') this.query = '';
         this.route = route;
         await this.loadRoute();
       });
       document.addEventListener('keydown', (e) => this.onKeydown(e));
+    },
+
+    // The editor is swappable (AGENTS.md). This is where the CodeMirror wrapper
+    // is mounted onto the DOM; storage never sees the editor itself.
+    mountEditor(el) {
+      if (this.editor && this.editor.view.dom.parentElement === el) return;
+      if (this.editor) this.editor.destroy();
+      this.editor = createMarkdownEditor(el, {
+        getDoc: () => (this.note ? this.note.body : ''),
+        onDocChange: (doc) => {
+          if (!this.note) return;
+          this.note.body = doc;
+          this.touch();
+        },
+      });
     },
 
     // Keyboard shortcuts (T22): Ctrl/Cmd+N new, +S save, +E preview, +K search.
@@ -105,6 +130,20 @@ document.addEventListener('alpine:init', () => {
       return { saved: 'Saved', dirty: 'Unsaved changes', saving: 'Saving…' }[this.saveState];
     },
 
+    // Settings (T23). Called from the settings view on every control change;
+    // normalizes each value before it touches the page or localStorage.
+    applySettings() {
+      const s = this.settings;
+      if (!['light', 'dark', 'system'].includes(s.theme)) s.theme = DEFAULT_SETTINGS.theme;
+      s.editorFontSize = FONT_SIZES.includes(Number(s.editorFontSize)) ? Number(s.editorFontSize) : DEFAULT_SETTINGS.editorFontSize;
+      if (s.defaultPreview !== 'edit' && s.defaultPreview !== 'preview') {
+        s.defaultPreview = DEFAULT_SETTINGS.defaultPreview;
+      }
+      this.settings = { ...s };
+      applySettings(this.settings);
+      saveSettings(this.settings);
+    },
+
     get rendered() {
       if (!this.note) return '';
       const html = marked.parse(this.note.body, { async: false, gfm: true, breaks: true });
@@ -114,6 +153,10 @@ document.addEventListener('alpine:init', () => {
     async loadRoute() {
       if (this.route.name === 'note') {
         await this.openNote(this.route.params.id);
+      } else if (this.route.name === 'settings') {
+        // Settings is a static view; the list index is unnecessary here.
+        this.note = null;
+        this.preview = false;
       } else {
         this.note = null;
         this.preview = false;
@@ -146,8 +189,11 @@ document.addEventListener('alpine:init', () => {
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
       };
-      this.preview = false;
+      this.preview = this.settings.defaultPreview === 'preview';
       this.saveState = 'saved';
+      // If the editor is already mounted (note→note navigation, e.g. Ctrl+N),
+      // swap its document in place. A fresh mount reads getDoc() instead.
+      if (this.editor) this.editor.setDoc(this.note.body || '');
     },
 
     open(id) {

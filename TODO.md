@@ -26,10 +26,10 @@ A shippable local-first Markdown notes app.
 
 ## v1 — P1
 
-- [ ] **T20** Replace the `<textarea>` with CodeMirror 6 (Markdown mode). *DoD: zero changes to the data model.*
+- [x] **T20** Replace the `<textarea>` with CodeMirror 6 (Markdown mode). *DoD: zero changes to the data model.* Verified (agent-browser, 2026-09-24): mounts on `#/note/:id`, typing persists via the debounced save, preview toggles and re-mounts cleanly, note→note `setDoc` swap works; no DB schema or record-shape change.
 - [x] **T21** Add trash view (`#/trash`) with restore, and hard-delete from trash only. *Verified: `db.hardDelete` reachable only from the trash view; restore is the sole way to clear `deletedAt`.*
 - [x] **T22** Add keyboard shortcuts (new note, save, focus search, toggle preview). *Ctrl/Cmd+N new, +S save, +E preview, +K search; hints on controls.*
-- [ ] **T23** Add settings persisted to localStorage (theme, font size, default preview state). *The only sanctioned localStorage use — settings, never note data.*
+- [x] **T23** Add settings persisted to localStorage (theme, font size, default preview state). *The only sanctioned localStorage use — settings, never note data.* Verified (agent-browser, 2026-09-24): single `noted.settings` key, validated on load; theme switch flips `data-theme` (+ `prefers-color-scheme` fallback), font size drives `--editor-font-size`, default preview makes `#/note/:id` open in preview; `#/settings` route + view.
 - [ ] **T24** Add folders: new `folders` table via Dexie v2 with a migration backfill.
 - [ ] **T25** Add offline/online indicator and an IndexedDB storage-usage estimate.
 - [ ] **T26** Add note pinning and sort options; add bulk Markdown export as a zip (requires a CDN zip dependency).
@@ -57,4 +57,4 @@ These are decisions, not unfinished work. Do not pick them up; argue against the
 ## Done
 
 - **MVP P0** — T01–T17 complete. Deployed to `noted.360481025.xyz` (GitHub Pages).
-- **v1** — T21 (trash view, restore, trash-only hard delete) and T22 (keyboard shortcuts). Next: T20 (CodeMirror 6) / T23 (settings).
+- **v1** — T20 (CodeMirror 6 editor), T21 (trash view), T22 (keyboard shortcuts), T23 (settings). Next: T24 (folders, Dexie v2) / T25 (offline indicator + storage estimate).

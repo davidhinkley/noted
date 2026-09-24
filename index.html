@@ -21,6 +21,39 @@
        before Alpine.start() runs. The UMD build auto-starts on its own microtask,
        before later <script type="module"> files execute. -->
 
+  <!-- CodeMirror 6 arrives as ES modules through an import map — no bundler,
+       consistent with the no-build-step rule. Every bare specifier in the
+       @codemirror/@lezer graph is pinned here so each package resolves to a
+       single shared module instance (duplicates would break editor state).
+       ui/editor.js is the only file that imports any of these. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@codemirror/state": "https://cdn.jsdelivr.net/npm/@codemirror/state@6.7.6/dist/index.js",
+        "@codemirror/view": "https://cdn.jsdelivr.net/npm/@codemirror/view@6.43.13/dist/index.js",
+        "@codemirror/commands": "https://cdn.jsdelivr.net/npm/@codemirror/commands@6.11.1/dist/index.js",
+        "@codemirror/language": "https://cdn.jsdelivr.net/npm/@codemirror/language@6.12.4/dist/index.js",
+        "@codemirror/search": "https://cdn.jsdelivr.net/npm/@codemirror/search@6.7.2/dist/index.js",
+        "@codemirror/lang-markdown": "https://cdn.jsdelivr.net/npm/@codemirror/lang-markdown@6.5.2/dist/index.js",
+        "@codemirror/lang-html": "https://cdn.jsdelivr.net/npm/@codemirror/lang-html@6.4.12/dist/index.js",
+        "@codemirror/lang-css": "https://cdn.jsdelivr.net/npm/@codemirror/lang-css@6.3.1/dist/index.js",
+        "@codemirror/lang-javascript": "https://cdn.jsdelivr.net/npm/@codemirror/lang-javascript@6.2.5/dist/index.js",
+        "@codemirror/autocomplete": "https://cdn.jsdelivr.net/npm/@codemirror/autocomplete@6.20.3/dist/index.js",
+        "@lezer/common": "https://cdn.jsdelivr.net/npm/@lezer/common@1.5.2/dist/index.js",
+        "@lezer/highlight": "https://cdn.jsdelivr.net/npm/@lezer/highlight@1.2.3/dist/index.js",
+        "@lezer/lr": "https://cdn.jsdelivr.net/npm/@lezer/lr@1.4.10/dist/index.js",
+        "@lezer/markdown": "https://cdn.jsdelivr.net/npm/@lezer/markdown@1.7.2/dist/index.js",
+        "@lezer/html": "https://cdn.jsdelivr.net/npm/@lezer/html@1.3.13/dist/index.js",
+        "@lezer/css": "https://cdn.jsdelivr.net/npm/@lezer/css@1.3.8/dist/index.js",
+        "@lezer/javascript": "https://cdn.jsdelivr.net/npm/@lezer/javascript@1.5.5/dist/index.js",
+        "style-mod": "https://cdn.jsdelivr.net/npm/style-mod@4.1.4/src/style-mod.js",
+        "w3c-keyname": "https://cdn.jsdelivr.net/npm/w3c-keyname@2.2.8/index.js",
+        "crelt": "https://cdn.jsdelivr.net/npm/crelt@1.0.7/index.js",
+        "@marijn/find-cluster-break": "https://cdn.jsdelivr.net/npm/@marijn/find-cluster-break@1.0.4/src/index.js"
+      }
+    }
+  </script>
+
   <!-- App modules -->
   <script type="module" src="js/ui/app.js"></script>
   <script type="module" src="js/pwa.js"></script>
@@ -28,8 +61,8 @@
 <body>
   <div id="app" x-data="app" x-cloak>
     <header class="topbar">
-      <a class="brand" href="#/">NOTED</a>
-      <template x-if="route.name !== 'note'">
+      <a class="brand" href="#/">noted</a>
+      <template x-if="route.name !== 'note' && route.name !== 'settings'">
         <input class="search" type="search" x-model="query" placeholder="Search notes…" autocomplete="off" title="Search (Ctrl+K)">
       </template>
       <span class="topbar-spacer"></span>
@@ -37,6 +70,7 @@
         <button type="button" class="btn" @click="triggerImport()">Import</button>
         <button type="button" class="btn" @click="exportAll()">Export</button>
         <a class="btn" href="#/trash">Trash</a>
+        <a class="btn" href="#/settings">Settings</a>
         <button type="button" class="btn primary" title="New note (Ctrl+N)" @click="newNote()">+ New</button>
       </div>
     </header>
@@ -113,6 +147,42 @@
         </section>
       </template>
 
+      <!-- SETTINGS view (T23) -->
+      <template x-if="route.name === 'settings'">
+        <section class="list-view">
+          <h1 class="view-title">Settings</h1>
+          <p class="view-sub"><a href="#/">← Back to notes</a></p>
+
+          <div class="settings">
+            <label class="settings-row">
+              <span>Theme</span>
+              <select x-model="settings.theme" @change="applySettings()">
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </label>
+
+            <label class="settings-row">
+              <span>Editor font size</span>
+              <select x-model="settings.editorFontSize" @change="applySettings()">
+                <option :value="13">Small (13px)</option>
+                <option :value="15">Normal (15px)</option>
+                <option :value="17">Large (17px)</option>
+              </select>
+            </label>
+
+            <label class="settings-row">
+              <span>Open a note in</span>
+              <select x-model="settings.defaultPreview" @change="applySettings()">
+                <option value="edit">Edit mode</option>
+                <option value="preview">Preview mode</option>
+              </select>
+            </label>
+          </div>
+        </section>
+      </template>
+
       <!-- EDITOR view -->
       <template x-if="route.name === 'note' && note">
         <section class="editor">
@@ -141,13 +211,7 @@
           >
 
           <div class="editor-body">
-            <textarea
-              x-show="!preview"
-              x-model="note.body"
-              @input="touch()"
-              placeholder="Write Markdown…"
-              spellcheck="true"
-            ></textarea>
+            <div class="cm-host" x-show="!preview" x-init="mountEditor($el)"></div>
             <article class="preview markdown-body" x-show="preview" x-html="rendered"></article>
           </div>
         </section>

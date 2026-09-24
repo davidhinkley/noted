@@ -8,7 +8,7 @@
  *   so the app works from any subdirectory.
  */
 
-const CACHE_VERSION = 'noted-v3';
+const CACHE_VERSION = 'noted-v6';
 
 const SHELL_FILES = [
   'index.html',
@@ -18,6 +18,8 @@ const SHELL_FILES = [
   'js/router.js',
   'js/pwa.js',
   'js/ui/app.js',
+  'js/ui/editor.js',
+  'js/ui/settings.js',
   'js/io/export.js',
   'js/io/import.js',
   'manifest.json',

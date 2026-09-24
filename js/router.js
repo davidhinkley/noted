@@ -17,6 +17,11 @@ const ROUTES = [
     pattern: /^#\/trash\/?$/,
     params: () => ({}),
   },
+  {
+    name: 'settings',
+    pattern: /^#\/settings\/?$/,
+    params: () => ({}),
+  },
 ];
 
 function safeDecode(value) {

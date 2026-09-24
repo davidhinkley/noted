@@ -9,6 +9,7 @@ NOTED is a local-first Markdown notes app: a **buildless static SPA**. The brows
 - **Fuse.js** — client-side fuzzy search (CDN)
 - **marked** — Markdown → HTML (CDN)
 - **DOMPurify** — sanitize rendered Markdown (CDN)
+- **CodeMirror 6** — Markdown editor, ES modules via a pinned import map (CDN)
 - **Vanilla CSS**, hash routing, ES modules
 
 The app ships **zero npm dependencies**. Every library loads from a CDN. `package.json` holds dev-only tooling and never reaches production.
@@ -24,7 +25,7 @@ The app ships **zero npm dependencies**. Every library loads from a CDN. `packag
 
 ### What does not exist
 
-- **No build step.** Do not add Vite, webpack, Rollup, esbuild, or TypeScript compilation.
+- **No build step.** Do not add Vite, webpack, Rollup, esbuild, or TypeScript compilation. An `<script type="importmap">` is **not** a build step — it is declarative CDN wiring; never replace it with a bundler.
 - **No lint step.** Do not add eslint, prettier, or htmlhint without raising it in a PR first.
 - **No test suite.** Do not add vitest, jest, or playwright without raising it in a PR first.
 - **No CI pipeline.** Deployment is documented in `docs/deployment.md` (`TODO.md` **T16**).
@@ -55,7 +56,7 @@ Naming these gaps is deliberate. The default failure mode of a coding agent is t
 
 ### UI
 
-- The editor is **swappable**. Today it is a plain `<textarea>`. Never couple storage, rendering, or export to a specific editor component.
+- The editor is **swappable**. Today it is a CodeMirror 6 view behind `js/ui/editor.js` — the **only** file allowed to import CodeMirror. Never couple storage, rendering, or export to a specific editor component.
 
 ### Process
 
