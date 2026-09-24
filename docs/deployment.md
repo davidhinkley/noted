@@ -4,7 +4,7 @@ How to ship NOTED. The source is the artifact — no build step, deployment is a
 
 **Chosen target (T17, 2026-09-23): GitHub Pages (project site) behind a custom subdomain** — `noted.360481025.xyz` maps to `davidhinkley.github.io`. Branch-based publishing from `main`, no Actions workflow, no CI.
 
-**Status (release-ritual verified 2026-09-24):** SW active with scope `https://noted.360481025.xyz/`, cache `noted-v9` holding all shell files, CDN libs runtime-cached, hard-offline create/edit working. *Enforce HTTPS* active (`http://` → 301 → `https://`). Live spot-check: pin toggle + reorder, sort control, zip export path.
+**Status (release-ritual verified 2026-09-24):** SW active with scope `https://noted.360481025.xyz/`, cache `noted-v11` holding all shell files, CDN libs runtime-cached, hard-offline create/edit working. *Enforce HTTPS* active (`http://` → 301 → `https://`). Live spot-check: vault lock/unlock matrix, pin toggle + reorder, sort control, zip export path.
 
 ## The release ritual — every release, no exceptions
 
