@@ -1,15 +1,23 @@
 /* io/import.js — JSON import with validation. Hands results to db.js. */
 
 import { SCHEMA_VERSION } from './export.js';
-import { bulkImport, bulkImportAttachments } from '../db.js';
+import { bulkImport, bulkImportAttachments, mergeImport } from '../db.js';
 
 /**
  * Validates an export file and upserts its notes (idempotent by id).
  * Unknown top-level fields are ignored so future export formats import
  * cleanly; records without a string `body` are skipped. Accepts v1 files
  * (no attachments key) and v2 files (base64 attachments, T31).
+ *
+ * Two modes (T32 — file-relay sync, D13):
+ * - 'merge' (default, lossless): per-id compare. Incoming updatedAt greater
+ *   than local replaces; lesser keeps local; equal is a no-op. IDs on only
+ *   one side are added. Delete-vs-edit ties go to the live side — an edit
+ *   is never silently discarded. Attachments are add-if-absent by id
+ *   (blobs are immutable). The whole merge runs in one transaction.
+ * - 'replace' (backup restore): blind bulkPut, exactly the pre-T32 behavior.
  */
-export async function importJSON(text) {
+export async function importJSON(text, { mode = 'merge' } = {}) {
   let data;
   try {
     data = JSON.parse(text);
@@ -37,18 +45,22 @@ export async function importJSON(text) {
     else skipped += 1;
   }
 
-  await bulkImport(notes);
-
-  let attachments = 0;
+  const atts = [];
   if (Array.isArray(data.attachments)) {
-    const atts = [];
     for (const raw of data.attachments) {
       const att = normalizeAttachment(raw);
       if (att) atts.push(att);
     }
-    if (atts.length) attachments = await bulkImportAttachments(atts);
   }
-  return { imported: notes.length, skipped, attachments };
+
+  let merged = null;
+  if (mode === 'replace') {
+    await bulkImport(notes);
+    if (atts.length) await bulkImportAttachments(atts);
+  } else {
+    merged = await mergeImport(notes, atts);
+  }
+  return { imported: notes.length, skipped, attachments: atts.length, merged };
 }
 
 function isNum(v) {

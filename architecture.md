@@ -320,6 +320,14 @@ An inlined decision log. Same format as an ADR, just not yet split into files.
 - **Rationale:** IndexedDB stores Blobs natively, so there is no encoding tax at rest; the table is indexed, transactional, and rides the existing export/import backup story (base64 inside export v2) with no new subsystem to operate. OPFS would add manual GC, unindexed lookups, and a second backup path for no gain at note-attachment scale.
 - **Consequences:** A 25MB per-file cap protects the shared origin quota (one giant blob must not evict the vault). Attachment *bytes* follow the vault when it is on (AES-GCM binary envelope, `enc` flag on the record, app-layer encrypt/decrypt — the store stays dumb); titles/types/sizes stay plaintext metadata. Export `SCHEMA_VERSION` goes 1→2; import accepts v1 (no attachments key) and v2.
 
+### D13. Sync is file-relay merge; no server path
+- **Status:** accepted
+- **Date:** 2026-09-24
+- **Context:** T32 asked for cross-device sync "with conflict resolution + auth + a server". A server-side data path contradicts the blocked list and the product promise ("your data never leaves your device"). Verdict: sync = the v2 export file moved over any user-controlled channel, merged on import.
+- **Decision:** `importJSON` gains a `mode`: `'merge'` (default) does a per-id compare in one transaction — incoming `updatedAt` greater replaces, lesser keeps local, equal is a no-op, ids on one side only are added, and **equal-timestamp delete-vs-edit ties go to the live side** so an edit is never silently discarded. Attachments are immutable: add-if-absent by id. `'replace'` (blind bulkPut, pre-T32 behavior) survives only as the Settings "Restore backup" action behind a confirm. Topbar Import always merges; its result alert reports added/updated/kept.
+- **Rationale:** "Newer wins" alone is a data-loss coin flip (an offline laptop edit dies to an older phone export). The tiebreak + keep-local rules make merge a small extension of T13 rather than a new architecture, reusing UUIDv4 ids, timestamps, soft deletes, and the existing export format. There is no auth surface because there is no server — the user owns the channel, and that is the point, not a gap.
+- **Consequences:** True backup restore needs the replace path (merge would rightly refuse to overwrite newer local rows with an older backup). Manual file movement is accepted as the relay; if sync must ever become automatic, the product promise changes first, as its own decision — never as a side effect of this one.
+
 ### Split trigger
 
 When this section exceeds ~5 decisions or one screen — or the first time a decision already recorded here is re-litigated in a PR — split it into `docs/decisions/NNNN-short-title.md` and replace it with a link list. Add `0001-record-architecture-decisions.md` (the meta-ADR documenting the decision to use ADRs) at that point, not before.

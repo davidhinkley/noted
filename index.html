@@ -72,7 +72,7 @@
         <template x-if="vault.enabled">
           <button type="button" class="btn" @click="vault.unlocked ? lockVault() : unlockVault()" :title="vault.unlocked ? 'Lock vault' : 'Unlock vault'" x-text="vault.unlocked ? '🔓' : '🔒'"></button>
         </template>
-        <button type="button" class="btn" @click="triggerImport()">Import</button>
+        <button type="button" class="btn" @click="triggerImport()" title="Import a backup file (merge: adds new, applies newer, never discards edits)">Import</button>
         <button type="button" class="btn" @click="exportAll()">Export</button>
         <button type="button" class="btn" @click="exportZip()" title="Export all notes as Markdown zip">Export .zip</button>
         <a class="btn" href="#/trash">Trash</a>
@@ -284,6 +284,12 @@
             <template x-if="vault.enabled && vault.unlocked">
               <button type="button" class="btn danger" @click="disableEncryption()">Turn encryption off…</button>
             </template>
+
+            <div class="settings-row">
+              <span>Backup</span>
+              <span class="settings-value">Topbar Import merges; restore replaces</span>
+            </div>
+            <button type="button" class="btn danger" @click="restoreBackup()">Restore backup file (replace)…</button>
           </div>
         </section>
       </template>

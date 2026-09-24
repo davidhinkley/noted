@@ -633,7 +633,12 @@ document.addEventListener('alpine:init', () => {
       exportMarkdown({ title: this.note.title.trim() || deriveTitle(this.note.body), body: this.note.body });
     },
 
-    triggerImport() {
+    // Import mode split (T32, D13): the topbar Import merges (lossless sync
+    // default); true backup restore lives in Settings as a destructive action.
+    _importMode: 'merge',
+
+    triggerImport(mode = 'merge') {
+      this._importMode = mode;
       this.$refs.importFile.click();
     },
 
@@ -642,16 +647,31 @@ document.addEventListener('alpine:init', () => {
       event.target.value = '';
       if (!file) return;
       try {
-        const result = await importJSON(await file.text());
+        const result = await importJSON(await file.text(), { mode: this._importMode });
+        const m = result.merged;
         window.alert(
-          `Imported ${result.imported} note${result.imported === 1 ? '' : 's'}` +
-            (result.attachments ? ` and ${result.attachments} attachment${result.attachments === 1 ? '' : 's'}` : '') +
-            (result.skipped ? `, skipped ${result.skipped} invalid record${result.skipped === 1 ? '' : 's'}.` : '.'),
+          m
+            ? `Sync merge: ${m.added} added, ${m.updated} updated, ${m.kept} kept` +
+              (m.attachmentsAdded ? `, ${m.attachmentsAdded} attachment${m.attachmentsAdded === 1 ? '' : 's'} added` : '') +
+              (result.skipped ? `, skipped ${result.skipped} invalid record${result.skipped === 1 ? '' : 's'}.` : '.')
+            : `Restored ${result.imported} note${result.imported === 1 ? '' : 's'}` +
+              (result.attachments ? ` and ${result.attachments} attachment${result.attachments === 1 ? '' : 's'}` : '') +
+              (result.skipped ? `, skipped ${result.skipped} invalid record${result.skipped === 1 ? '' : 's'}.` : '.'),
         );
         await this.refreshList();
       } catch (err) {
         window.alert(`Import failed: ${err.message}`);
       }
+    },
+
+    async restoreBackup() {
+      if (
+        !window.confirm(
+          'Restore replaces every conflicting note with the backup copy. Local edits newer than the backup will be lost. Continue?',
+        )
+      )
+        return;
+      this.triggerImport('replace');
     },
 
     fmtDate,

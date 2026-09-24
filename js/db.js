@@ -274,3 +274,52 @@ export async function folderNoteCounts(ids) {
 export function bulkImport(notes) {
   return db.notes.bulkPut(notes).then(() => notes.length);
 }
+
+/**
+ * Merge validated notes + attachments for file-relay sync (T32, D13).
+ * Per-id compare in a single transaction: incoming updatedAt greater than
+ * local replaces, lesser keeps local, equal is a no-op — except
+ * delete-vs-edit ties at equal timestamps, where the live side wins so an
+ * edit is never silently discarded. IDs on only one side are added.
+ * Attachments are immutable blobs: add-if-absent by id.
+ */
+export function mergeImport(notes, atts) {
+  return db.transaction('rw', db.notes, db.attachments, async () => {
+    let added = 0;
+    let updated = 0;
+    let kept = 0;
+    for (const incoming of notes) {
+      const local = await db.notes.get(incoming.id);
+      if (!local) {
+        await db.notes.add(incoming);
+        added += 1;
+      } else if (incoming.updatedAt > local.updatedAt) {
+        await db.notes.put(incoming);
+        updated += 1;
+      } else if (incoming.updatedAt === local.updatedAt && isLive(incoming) !== isLive(local)) {
+        // Same timestamp, disagree on deletion: the live side wins.
+        // An edit is never silently discarded by a concurrent delete.
+        if (isLive(incoming)) {
+          await db.notes.put(incoming);
+          updated += 1;
+        } else {
+          kept += 1;
+        }
+      } else {
+        kept += 1;
+      }
+    }
+    let attachmentsAdded = 0;
+    for (const att of atts) {
+      if (!(await db.attachments.get(att.id))) {
+        await db.attachments.add(att);
+        attachmentsAdded += 1;
+      }
+    }
+    return { added, updated, kept, attachmentsAdded };
+  });
+}
+
+function isLive(note) {
+  return note.deletedAt == null;
+}
