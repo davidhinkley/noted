@@ -297,13 +297,20 @@ An inlined decision log. Same format as an ADR, just not yet split into files.
 - **Rationale:** Settings are trivial, non-relational, and browser-local; a Dexie table for three scalars is overhead, and settings must survive a note-store reset (or a future encryption passphrase change) without being entangled with note data. localStorage's 5MB cap and synchronous API are irrelevant at this size.
 - **Consequences:** The one sanctioned exception to "Dexie only." Any new localStorage key needs a decision entry here first. Settings are never part of export/import — they are device preferences, not content.
 
-### D10. Bulk zip export via JSZip `+esm`, not a pinned dist URL
-- **Status:** accepted
+### D10. Bulk zip export via JSZip `+esm`, not a pinned dist URL- **Status:** accepted
 - **Date:** 2026-09-24
 - **Context:** T26 needs client-side zip creation. JSZip ships a UMD `dist` bundle with no ESM exports, so a pinned dist URL in the import map would resolve `default` to `undefined`.
 - **Decision:** Map `jszip` to jsdelivr's `+esm` build (`https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm`) and resolve defensively (`mod.default ?? mod.JSZip ?? window.JSZip`, throw if missing).
 - **Rationale — why this doesn't violate D8:** D8 bans `+esm` for CodeMirror because its packages share module *instances* across bare imports. JSZip's dist bundle is self-contained (no bare imports), so the `+esm` wrapper is a single re-export with no duplication hazard. Hand-pinning the UMD file would look consistent but be silently broken.
 - **Consequences:** `exportMarkdownZip` stays lazy-loadable and offline-tolerant (runtime-cached like all CDN URLs); a load failure surfaces as an alert, never a silent no-op.
+
+### D11. Vault encryption at the Dexie boundary, key in memory only
+- **Status:** accepted
+- **Date:** 2026-09-24
+- **Context:** T30 encrypts note bodies with AES-256-GCM, key derived from a passphrase via PBKDF2-SHA256 (600k iterations). AGENTS.md requires a decision entry before any new storage layer.
+- **Decision:** Ciphertext envelopes (`ENC1.<iv>.<data>`) live in the existing `body` field — no Dexie schema change, so no version bump. Salt + verifier live in localStorage under one key (`noted.crypto`); the key itself lives in memory only and is never persisted, exported, or logged. Reads decrypt-or-keep (a forged envelope fails closed); when locked, list/search work on body-blanked copies so ciphertext never leaks into the Fuse index or excerpts, and the editor is unreachable.
+- **Rationale:** Envelope-in-`body` keeps every existing query, index, migration, and the export/import roundtrip working unchanged — export stays lossless (ciphertext preserved), import passes envelopes through as opaque strings. A separate encrypted store would have doubled the migration surface for zero security gain.
+- **Consequences:** Enabling/disabling encrypts/decrypts every row (trash included) and bumps `updatedAt` via the normal write path, so the list re-sorts once. Titles, tags, folders, and timestamps stay plaintext (searchable metadata by design). Forgetting the passphrase is unrecoverable — the UI warns at setup. No passphrase change flow yet (disable + re-enable covers it).
 
 ### Split trigger
 

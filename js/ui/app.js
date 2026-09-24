@@ -10,6 +10,15 @@ import * as db from '../db.js';
 import { buildIndex, search } from '../search.js';
 import { startRouter, navigate } from '../router.js';
 import { exportJSON, exportMarkdown, exportMarkdownZip } from '../io/export.js';
+import {
+  vaultEnabled,
+  isEnvelope,
+  setupVault,
+  openVault,
+  clearVaultConfig,
+  encryptBody,
+  decryptBody,
+} from '../crypto.js';
 import { importJSON } from '../io/import.js';
 import { createMarkdownEditor } from './editor.js';
 import { loadSettings, saveSettings, applySettings, DEFAULT_SETTINGS, FONT_SIZES } from './settings.js';
@@ -58,6 +67,8 @@ document.addEventListener('alpine:init', () => {
     folderCounts: {}, // { [folderId]: noteCount } for the folders view
     online: navigator.onLine, // net indicator (T25); updated by window events
     storageUsage: null, // { usage, quota } bytes from navigator.storage.estimate() (T25)
+    vault: { enabled: false, unlocked: false }, // vault encryption (T30); key in _vaultKey only
+    _vaultKey: null, // CryptoKey in memory only — never persisted, never in export
     sortBy: 'updatedAt-desc', // T26: sort options
     sortOptions: [
       { value: 'updatedAt-desc', label: 'Updated ↓' },
@@ -72,6 +83,7 @@ document.addEventListener('alpine:init', () => {
     init() {
       this.settings = loadSettings();
       applySettings(this.settings);
+      this.vault.enabled = vaultEnabled();
       startRouter(async (route) => {
         // Flush pending edits before leaving the editor.
         if (this.route.name === 'note' && route.name !== 'note') {
@@ -240,7 +252,7 @@ document.addEventListener('alpine:init', () => {
     },
 
     async refreshList() {
-      this.notes =
+      const fetched =
         this.route.name === 'tag'
           ? await db.listByTag(this.route.params.tag)
           : this.route.name === 'trash'
@@ -248,7 +260,30 @@ document.addEventListener('alpine:init', () => {
             : this.route.name === 'folder'
               ? await db.listByFolder(this.route.params.id)
               : await db.listActiveNotes();
+      this.notes = await this.decipherNotes(fetched);
       buildIndex(this.notes);
+    },
+
+    // Vault (T30). When unlocked, envelopes decrypt in place (decrypt-or-keep
+    // fallback: a forged envelope fails closed and keeps its raw form).
+    // When locked, envelope bodies are blanked so the search index and
+    // excerpts never leak ciphertext — titles stay visible for navigation.
+    async decipherNotes(notes) {
+      if (!this.vault.enabled) return notes;
+      if (this.vault.unlocked && this._vaultKey) {
+        await Promise.all(
+          notes.map(async (n) => {
+            if (!isEnvelope(n.body)) return;
+            try {
+              n.body = await decryptBody(this._vaultKey, n.body);
+            } catch {
+              /* keep the envelope */
+            }
+          }),
+        );
+        return notes;
+      }
+      return notes.map((n) => (isEnvelope(n.body) ? { ...n, body: '' } : n));
     },
 
     async refreshFolders() {
@@ -260,6 +295,11 @@ document.addEventListener('alpine:init', () => {
       if (this.note && this.note.id === id) return;
       const n = await db.getNote(id);
       if (!n || n.deletedAt != null) {
+        navigate('#/');
+        return;
+      }
+      if (isEnvelope(n.body) && !(this.vault.unlocked && this._vaultKey)) {
+        window.alert('This note is encrypted. Unlock the vault to read it.');
         navigate('#/');
         return;
       }
@@ -275,6 +315,14 @@ document.addEventListener('alpine:init', () => {
       };
       this.preview = this.settings.defaultPreview === 'preview';
       this.saveState = 'saved';
+      // The draft holds plaintext in memory; the envelope stays in the DB.
+      if (isEnvelope(this.note.body) && this.vault.unlocked && this._vaultKey) {
+        try {
+          this.note.body = await decryptBody(this._vaultKey, this.note.body);
+        } catch {
+          /* keep the envelope */
+        }
+      }
       // If the editor is already mounted (note→note navigation, e.g. Ctrl+N),
       // swap its document in place. A fresh mount reads getDoc() instead.
       if (this.editor) this.editor.setDoc(this.note.body || '');
@@ -285,6 +333,10 @@ document.addEventListener('alpine:init', () => {
     },
 
     async newNote() {
+      if (this.vault.enabled && !(this.vault.unlocked && this._vaultKey)) {
+        window.alert('The vault is locked. Unlock it to write a new note.');
+        return null;
+      }
       const n = await db.createNote();
       navigate(`#/note/${n.id}`);
       return n;
@@ -298,13 +350,22 @@ document.addEventListener('alpine:init', () => {
 
     async saveNow() {
       if (!this.note || this.saveState === 'saved') return;
+      if (this.vault.enabled && !(this.vault.unlocked && this._vaultKey)) {
+        window.alert('The vault is locked. Unlock it to save changes.');
+        this.saveState = 'dirty';
+        return;
+      }
       clearTimeout(this._saveTimer);
       const id = this.note.id;
       this.saveState = 'saving';
       const title = this.note.title.trim() || deriveTitle(this.note.body);
+      const body =
+        this.vault.enabled && this.vault.unlocked && this._vaultKey
+          ? await encryptBody(this._vaultKey, this.note.body)
+          : this.note.body;
       const updated = await db.updateNote(id, {
         title,
-        body: this.note.body,
+        body,
         tags: parseTags(this.note.tagsInput),
         folderId: this.note.folderId || null,
       });
@@ -400,6 +461,89 @@ document.addEventListener('alpine:init', () => {
       } catch (err) {
         window.alert(`Zip export failed: ${err.message}`);
       }
+    },
+
+    // ---- vault encryption (T30, D11) ----
+
+    async enableEncryption() {
+      if (this.vault.enabled) return;
+      const p1 = window.prompt(
+        'Set a vault passphrase (at least 8 characters).\nIt is never stored — forget it and encrypted notes stay locked.',
+      );
+      if (!p1) return;
+      if (p1.length < 8) {
+        window.alert('Passphrase must be at least 8 characters.');
+        return;
+      }
+      const p2 = window.prompt('Repeat the passphrase:');
+      if (p1 !== p2) {
+        window.alert('Passphrases do not match.');
+        return;
+      }
+      const key = await setupVault(p1);
+      // Encrypt every plaintext body, trash included — content is content.
+      // updateNote bumps updatedAt on each row; the list re-sorts once.
+      const all = await db.listAllNotes();
+      for (const n of all) {
+        if (!isEnvelope(n.body)) {
+          await db.updateNote(n.id, { body: await encryptBody(key, n.body) });
+        }
+      }
+      this._vaultKey = key;
+      this.vault = { enabled: true, unlocked: true };
+      await this.refreshList();
+      window.alert('Encryption is on. Your passphrase exists only in your memory.');
+    },
+
+    async unlockVault() {
+      if (!this.vault.enabled || this.vault.unlocked) return;
+      const p = window.prompt('Vault passphrase:');
+      if (!p) return;
+      try {
+        this._vaultKey = await openVault(p);
+      } catch {
+        window.alert('Wrong passphrase.');
+        return;
+      }
+      this.vault.unlocked = true;
+      await this.refreshList();
+    },
+
+    async lockVault() {
+      if (!this.vault.enabled || !this.vault.unlocked) return;
+      this._vaultKey = null;
+      this.vault.unlocked = false;
+      if (this.route.name === 'note') navigate('#/');
+      else await this.refreshList();
+    },
+
+    async disableEncryption() {
+      if (!this.vault.enabled || !this.vault.unlocked || !this._vaultKey) {
+        window.alert('Unlock the vault first.');
+        return;
+      }
+      if (!window.confirm('Decrypt every note and turn encryption off?')) return;
+      const key = this._vaultKey;
+      const all = await db.listAllNotes();
+      for (const n of all) {
+        if (!isEnvelope(n.body)) continue;
+        try {
+          await db.updateNote(n.id, { body: await decryptBody(key, n.body) });
+        } catch {
+          /* forged envelope: leave it */
+        }
+      }
+      clearVaultConfig();
+      this._vaultKey = null;
+      this.vault = { enabled: false, unlocked: false };
+      await this.refreshList();
+    },
+
+    excerptOf(n) {
+      if (this.vault.enabled && !this.vault.unlocked && !n.body) {
+        return '🔒 Encrypted — unlock the vault to read';
+      }
+      return excerpt(n.body);
     },
 
     async purge(id) {

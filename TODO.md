@@ -36,7 +36,7 @@ A shippable local-first Markdown notes app.
 
 ## Later — P2
 
-- [ ] **T30** Encrypt note bodies (AES-256-GCM, passphrase-derived key via Web Crypto) at the Dexie boundary.
+- [x] **T30** Encrypt note bodies (AES-256-GCM, passphrase-derived key via Web Crypto) at the Dexie boundary. *Verified (agent-browser, 2026-09-24): enable (double-prompt) → DB holds `ENC1.*` envelopes; locked blanks bodies + placeholder excerpts and blocks open/new; wrong passphrase rejected; unlock restores plaintext; edit-while-unlocked encrypt roundtrip; disable restores plaintext + clears salt. No schema change (D11).*
 - [ ] **T31** Add attachments: separate `attachments` store or OPFS blobs, linked via `note.attachments[]`.
 - [ ] **T32** Add cross-device sync (conflict resolution + auth + a server).
 - [ ] **T33** Move Fuse.js index building into a Web Worker once notes exceed ~2,000.
@@ -57,4 +57,4 @@ These are decisions, not unfinished work. Do not pick them up; argue against the
 ## Done
 
 - **MVP P0** — T01–T17 complete. Deployed to `noted.360481025.xyz` (GitHub Pages).
-- **v1** — T20 (CodeMirror 6 editor), T21 (trash view), T22 (keyboard shortcuts), T23 (settings), T24 (folders, v1→v2 migration), T25 (offline indicator + storage estimate), T26 (pinning, sort options, bulk Markdown zip — Dexie v3). **v1 complete.** Next: P2 queue (T30–T35).
+- **v1** — T20 (CodeMirror 6 editor), T21 (trash view), T22 (keyboard shortcuts), T23 (settings), T24 (folders, v1→v2 migration), T25 (offline indicator + storage estimate), T26 (pinning, sort options, bulk Markdown zip — Dexie v3). **v1 complete.** P2: T30 done (vault encryption, D11). Next: T31 (attachments).
