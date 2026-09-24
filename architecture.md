@@ -328,6 +328,13 @@ An inlined decision log. Same format as an ADR, just not yet split into files.
 - **Rationale:** "Newer wins" alone is a data-loss coin flip (an offline laptop edit dies to an older phone export). The tiebreak + keep-local rules make merge a small extension of T13 rather than a new architecture, reusing UUIDv4 ids, timestamps, soft deletes, and the existing export format. There is no auth surface because there is no server — the user owns the channel, and that is the point, not a gap.
 - **Consequences:** True backup restore needs the replace path (merge would rightly refuse to overwrite newer local rows with an older backup). Manual file movement is accepted as the relay; if sync must ever become automatic, the product promise changes first, as its own decision — never as a side effect of this one.
 
+### T34. Triggers-Doc: Vue/Svelte Migration (Criteria + Tripwire)
+- **Status:** planned
+- **Trigger Criteria:** When the application undergoes a Vue or Svelte migration (framework upgrade or rewrite). Specifically, when the migration introduces significant architectural changes that affect the indexing or search subsystem.
+- **Tripwire:** A version gate in the deployment pipeline that flags any pull request targeting Vue/Svelte migration and requires a corresponding architecture decision before merging.
+- **Scope:** No framework code changes. This is a documentation-only task to establish criteria and tripwires for future migration efforts.
+- **Impact:** Ensures that any major framework shift is preceded by a formal architectural review and decision record.
+
 ### Split trigger
 
 When this section exceeds ~5 decisions or one screen — or the first time a decision already recorded here is re-litigated in a PR — split it into `docs/decisions/NNNN-short-title.md` and replace it with a link list. Add `0001-record-architecture-decisions.md` (the meta-ADR documenting the decision to use ADRs) at that point, not before.
