@@ -1,6 +1,6 @@
 /* io/export.js — serialization for download. Never touches the DB directly. */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 function download(filename, text, mime) {
   const blob = new Blob([text], { type: `${mime};charset=utf-8` });
@@ -27,15 +27,38 @@ function slug(title) {
 /**
  * One JSON file with every note, including soft-deleted ones —
  * the export is the backup story, so it must be lossless.
+ * Attachments ride along as base64 (T31); v1 files simply omit the key.
  */
-export function exportJSON(notes) {
+export async function exportJSON(notes, attachments = []) {
+  const encoded = await Promise.all(
+    attachments.map(async (a) => ({
+      id: a.id,
+      noteId: a.noteId,
+      name: a.name,
+      type: a.type,
+      size: a.size,
+      enc: a.enc === true,
+      createdAt: a.createdAt,
+      data: await blobToB64(a.data),
+    })),
+  );
   const payload = {
     app: 'noted',
     schemaVersion: SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
     notes,
+    attachments: encoded,
   };
-  download(`noted-export-${stamp()}.json`, JSON.stringify(payload, null, 2), 'application/json');
+  download(`noted-export-${stamp()}.json`, JSON.stringify(payload), 'application/json');
+}
+
+function blobToB64(blob) {
+  return blob.arrayBuffer().then((buf) => {
+    const bytes = new Uint8Array(buf);
+    let s = '';
+    for (const b of bytes) s += String.fromCharCode(b);
+    return btoa(s);
+  });
 }
 
 /** One note → one .md download. */

@@ -118,3 +118,21 @@ export function encryptBody(key, plaintext) {
 export function decryptBody(key, envelope) {
   return decryptRaw(key, envelope.slice(PREFIX.length));
 }
+
+/**
+ * Binary envelope for attachment Blobs (T31): 12-byte IV prepended to the
+ * AES-GCM ciphertext, returned as a Blob. Same key discipline as bodies —
+ * memory only, never persisted.
+ */
+export async function encryptBlob(key, blob) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, await blob.arrayBuffer());
+  return new Blob([iv, data], { type: 'application/octet-stream' });
+}
+
+/** Inverse of encryptBlob. Throws on authentication failure. */
+export async function decryptBlob(key, blob, type) {
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  const data = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: buf.slice(0, 12) }, key, buf.slice(12));
+  return new Blob([data], { type: type || 'application/octet-stream' });
+}

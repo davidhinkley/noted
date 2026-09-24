@@ -312,6 +312,14 @@ An inlined decision log. Same format as an ADR, just not yet split into files.
 - **Rationale:** Envelope-in-`body` keeps every existing query, index, migration, and the export/import roundtrip working unchanged — export stays lossless (ciphertext preserved), import passes envelopes through as opaque strings. A separate encrypted store would have doubled the migration surface for zero security gain.
 - **Consequences:** Enabling/disabling encrypts/decrypts every row (trash included) and bumps `updatedAt` via the normal write path, so the list re-sorts once. Titles, tags, folders, and timestamps stay plaintext (searchable metadata by design). Forgetting the passphrase is unrecoverable — the UI warns at setup. No passphrase change flow yet (disable + re-enable covers it).
 
+### D12. Attachments: Dexie table, not OPFS
+- **Status:** accepted
+- **Date:** 2026-09-24
+- **Context:** T31 needs file attachments linked via `note.attachments[]` (reserved since v1). Candidates: a Dexie `attachments` table holding Blobs, or OPFS files keyed by id.
+- **Decision:** Dexie v4 adds `attachments: 'id, noteId, createdAt'` with the Blob in the record. All link maintenance (add/remove/purge) runs in read-write transactions spanning `notes` + `attachments`, so a blob and its link cannot disagree. Purge cascades — a hard-deleted note takes its blobs with it in the same transaction; soft-delete keeps them (restore keeps working).
+- **Rationale:** IndexedDB stores Blobs natively, so there is no encoding tax at rest; the table is indexed, transactional, and rides the existing export/import backup story (base64 inside export v2) with no new subsystem to operate. OPFS would add manual GC, unindexed lookups, and a second backup path for no gain at note-attachment scale.
+- **Consequences:** A 25MB per-file cap protects the shared origin quota (one giant blob must not evict the vault). Attachment *bytes* follow the vault when it is on (AES-GCM binary envelope, `enc` flag on the record, app-layer encrypt/decrypt — the store stays dumb); titles/types/sizes stay plaintext metadata. Export `SCHEMA_VERSION` goes 1→2; import accepts v1 (no attachments key) and v2.
+
 ### Split trigger
 
 When this section exceeds ~5 decisions or one screen — or the first time a decision already recorded here is re-litigated in a PR — split it into `docs/decisions/NNNN-short-title.md` and replace it with a link list. Add `0001-record-architecture-decisions.md` (the meta-ADR documenting the decision to use ADRs) at that point, not before.

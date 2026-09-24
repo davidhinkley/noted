@@ -37,8 +37,7 @@ A shippable local-first Markdown notes app.
 ## Later — P2
 
 - [x] **T30** Encrypt note bodies (AES-256-GCM, passphrase-derived key via Web Crypto) at the Dexie boundary. *Verified (agent-browser, 2026-09-24): enable (double-prompt) → DB holds `ENC1.*` envelopes; locked blanks bodies + placeholder excerpts and blocks open/new; wrong passphrase rejected; unlock restores plaintext; edit-while-unlocked encrypt roundtrip; disable restores plaintext + clears salt. No schema change (D11).*
-- [ ] **T31** Add attachments: separate `attachments` store or OPFS blobs, linked via `note.attachments[]`.
-- [ ] **T32** Add cross-device sync (conflict resolution + auth + a server).
+- [x] **T31** Add attachments: separate `attachments` store with Blobs (D12 over OPFS), linked via `note.attachments[]`. *Verified (agent-browser, 2026-09-24): attach → byte-exact Blob roundtrip; vault-on attach stores `enc:true` (+28B GCM overhead) with zero plaintext at rest; locked download blocked with alert; unlock decrypts to original bytes/MIME; remove unlinks transactionally; trash purge cascades (export shows 0 attachments after); export v2 carries base64 blobs and import restores note + bytes (RT probe).* Next: T32 (sync — needs user ruling).- [ ] **T32** Add cross-device sync (conflict resolution + auth + a server).
 - [ ] **T33** Move Fuse.js index building into a Web Worker once notes exceed ~2,000.
 - [ ] **T34** Migrate to Vue 3 or Svelte + Vite if a migration trigger in `architecture.md` fires.
 - [ ] **T35** Optionally add clean URLs via a `404.html` fallback, if a host supports it.

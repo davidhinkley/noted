@@ -18,6 +18,8 @@ import {
   clearVaultConfig,
   encryptBody,
   decryptBody,
+  encryptBlob,
+  decryptBlob,
 } from '../crypto.js';
 import { importJSON } from '../io/import.js';
 import { createMarkdownEditor } from './editor.js';
@@ -69,6 +71,7 @@ document.addEventListener('alpine:init', () => {
     storageUsage: null, // { usage, quota } bytes from navigator.storage.estimate() (T25)
     vault: { enabled: false, unlocked: false }, // vault encryption (T30); key in _vaultKey only
     _vaultKey: null, // CryptoKey in memory only — never persisted, never in export
+    attachments: [], // current note's attachment records (T31); blobs stay in the DB until download
     sortBy: 'updatedAt-desc', // T26: sort options
     sortOptions: [
       { value: 'updatedAt-desc', label: 'Updated ↓' },
@@ -235,6 +238,7 @@ document.addEventListener('alpine:init', () => {
         return;
       }
       this.note = null;
+      this.attachments = [];
       this.preview = false;
       if (this.route.name === 'settings') {
         await this.loadStorageInfo();
@@ -326,6 +330,7 @@ document.addEventListener('alpine:init', () => {
       // If the editor is already mounted (note→note navigation, e.g. Ctrl+N),
       // swap its document in place. A fresh mount reads getDoc() instead.
       if (this.editor) this.editor.setDoc(this.note.body || '');
+      this.attachments = await db.listAttachments(id);
     },
 
     open(id) {
@@ -398,6 +403,73 @@ document.addEventListener('alpine:init', () => {
     async restore(id) {
       await db.restoreNote(id);
       await this.refreshList();
+    },
+
+    // ---- attachments (T31) ----
+
+    // 25MB per file: IndexedDB quota is shared with notes, so one giant
+    // blob must not be able to evict the whole vault (see D12).
+    // Keep in sync with any UI hint text.
+    get maxAttachmentBytes() {
+      return 25 * 1024 * 1024;
+    },
+
+    triggerAttach() {
+      this.$refs.attachFile.click();
+    },
+
+    async onAttachFiles(event) {
+      const files = [...(event.target.files || [])];
+      event.target.value = '';
+      if (!this.note || !files.length) return;
+      if (this.vault.enabled && !(this.vault.unlocked && this._vaultKey)) {
+        window.alert('The vault is locked. Unlock it to attach files.');
+        return;
+      }
+      for (const f of files) {
+        if (f.size > this.maxAttachmentBytes) {
+          window.alert(`"${f.name}" is over 25MB and was skipped.`);
+          continue;
+        }
+        let data = f;
+        let enc = false;
+        if (this.vault.enabled && this.vault.unlocked && this._vaultKey) {
+          data = await encryptBlob(this._vaultKey, f);
+          enc = true;
+        }
+        await db.addAttachment(this.note.id, { name: f.name, type: f.type, data, enc });
+      }
+      this.attachments = await db.listAttachments(this.note.id);
+    },
+
+    async downloadAttachment(id) {
+      const att = this.attachments.find((a) => a.id === id) || (await db.getAttachment(id));
+      if (!att) return;
+      let blob = att.data;
+      if (att.enc) {
+        if (!(this.vault.unlocked && this._vaultKey)) {
+          window.alert('Unlock the vault to download this attachment.');
+          return;
+        }
+        try {
+          blob = await decryptBlob(this._vaultKey, att.data, att.type);
+        } catch {
+          window.alert('This attachment failed authentication.');
+          return;
+        }
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = att.name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    },
+
+    async removeAttachment(id) {
+      if (!window.confirm('Remove this attachment?')) return;
+      await db.removeAttachment(id);
+      if (this.note) this.attachments = await db.listAttachments(this.note.id);
     },
 
     // ---- folders (T24) ----
@@ -547,13 +619,13 @@ document.addEventListener('alpine:init', () => {
     },
 
     async purge(id) {
-      if (!window.confirm('Delete this note forever? This cannot be undone.')) return;
-      await db.hardDelete(id);
+      if (!window.confirm('Delete this note forever, with its attachments? This cannot be undone.')) return;
+      await db.purgeNote(id);
       await this.refreshList();
     },
 
     async exportAll() {
-      exportJSON(await db.listAllNotes());
+      await exportJSON(await db.listAllNotes(), await db.listAllAttachments());
     },
 
     exportMD() {
@@ -573,6 +645,7 @@ document.addEventListener('alpine:init', () => {
         const result = await importJSON(await file.text());
         window.alert(
           `Imported ${result.imported} note${result.imported === 1 ? '' : 's'}` +
+            (result.attachments ? ` and ${result.attachments} attachment${result.attachments === 1 ? '' : 's'}` : '') +
             (result.skipped ? `, skipped ${result.skipped} invalid record${result.skipped === 1 ? '' : 's'}.` : '.'),
         );
         await this.refreshList();

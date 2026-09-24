@@ -33,6 +33,15 @@ db.version(3).stores({
   });
 });
 
+// v4 (T31): separate `attachments` table (Blobs stored natively in
+// IndexedDB). note.attachments[] — reserved since v1 — now holds attachment
+// ids. No backfill: the table starts empty, no note rows move.
+db.version(4).stores({
+  notes: 'id, title, folderId, updatedAt, deletedAt, pinned, *tags',
+  folders: 'id, name, updatedAt',
+  attachments: 'id, noteId, createdAt',
+});
+
 function freshTimestamps() {
   const t = Date.now();
   return { createdAt: t, updatedAt: t };
@@ -121,7 +130,8 @@ export function restoreNote(id) {
 
 /**
  * Permanently delete. THE ONLY hard delete in the app — the trash view
- * (T21) is the sole caller. Everything else soft-deletes on purpose.
+ * (T21) is the sole caller, via purgeNote so attachments die with the note.
+ * Everything else soft-deletes on purpose.
  */
 export function hardDelete(id) {
   return db.notes.delete(id);
@@ -130,6 +140,74 @@ export function hardDelete(id) {
 /** Everything, including soft-deleted — the lossless backup for export. */
 export function listAllNotes() {
   return db.notes.orderBy('updatedAt').reverse().toArray();
+}
+
+/** Every attachment in the vault — the lossless backup for export. */
+export function listAllAttachments() {
+  return db.attachments.orderBy('createdAt').toArray();
+}
+
+// ---- attachments (T31) ----
+
+/**
+ * Store one attachment Blob and link its id into note.attachments[].
+ * One transaction so the blob and the link cannot disagree. `data` is a
+ * Blob as-is — callers encrypt the bytes first when the vault demands it
+ * (the record carries `enc: true` in that case); the store stays dumb.
+ */
+export async function addAttachment(noteId, { name, type, data, enc = false }) {
+  const att = {
+    id: crypto.randomUUID(),
+    noteId,
+    name: String(name || 'file'),
+    type: String(type || 'application/octet-stream'),
+    size: data.size,
+    enc: enc === true,
+    createdAt: Date.now(),
+    data,
+  };
+  await db.transaction('rw', db.notes, db.attachments, async () => {
+    await db.attachments.add(att);
+    const n = await db.notes.get(noteId);
+    if (n) await db.notes.update(noteId, { attachments: [...(n.attachments || []), att.id] });
+  });
+  return att;
+}
+
+/** Attachments of one note, oldest first. */
+export function listAttachments(noteId) {
+  return db.attachments.where('noteId').equals(noteId).sortBy('createdAt');
+}
+
+export function getAttachment(id) {
+  return db.attachments.get(id);
+}
+
+/** Delete one attachment and unlink its id. Empties nothing else. */
+export async function removeAttachment(id) {
+  const att = await db.attachments.get(id);
+  if (!att) return;
+  await db.transaction('rw', db.notes, db.attachments, async () => {
+    await db.attachments.delete(id);
+    const n = await db.notes.get(att.noteId);
+    if (n) await db.notes.update(att.noteId, { attachments: (n.attachments || []).filter((a) => a !== id) });
+  });
+}
+
+/**
+ * Hard-delete a note with all its attachments — the trash purge path (T21).
+ * One transaction so no orphaned blobs survive the note.
+ */
+export async function purgeNote(id) {
+  await db.transaction('rw', db.notes, db.attachments, async () => {
+    await db.attachments.where('noteId').equals(id).delete();
+    await db.notes.delete(id);
+  });
+}
+
+/** Upsert validated attachments (import path only). */
+export function bulkImportAttachments(attachments) {
+  return db.attachments.bulkPut(attachments).then(() => attachments.length);
 }
 
 // ---- folders (T24) ----

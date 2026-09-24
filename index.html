@@ -331,6 +331,22 @@
             <div class="cm-host" x-show="!preview" x-init="mountEditor($el)"></div>
             <article class="preview markdown-body" x-show="preview" x-html="rendered"></article>
           </div>
+
+          <div class="attachments">
+            <div class="attachments-head">
+              <span x-text="'Attachments (' + attachments.length + ')'"></span>
+              <button type="button" class="btn tiny" @click="triggerAttach()" title="Attach files (max 25MB each)">+ Attach</button>
+            </div>
+            <ul class="attachment-list" x-show="attachments.length">
+              <template x-for="a in attachments" :key="a.id">
+                <li class="attachment-row">
+                  <button type="button" class="attachment-name" @click="downloadAttachment(a.id)" x-text="(a.enc ? '🔒 ' : '') + a.name"></button>
+                  <span class="attachment-meta" x-text="formatBytes(a.size)"></span>
+                  <button type="button" class="btn tiny danger" @click="removeAttachment(a.id)" title="Remove attachment">Remove</button>
+                </li>
+              </template>
+            </ul>
+          </div>
         </section>
       </template>
 
@@ -349,6 +365,7 @@
       @change="onImportFile($event)"
       hidden
     >
+    <input type="file" x-ref="attachFile" @change="onAttachFiles($event)" multiple hidden>
   </div>
 </body>
 </html>

@@ -8,7 +8,7 @@
  *   so the app works from any subdirectory.
  */
 
-const CACHE_VERSION = 'noted-v11';
+const CACHE_VERSION = 'noted-v12';
 
 const SHELL_FILES = [
   'index.html',
