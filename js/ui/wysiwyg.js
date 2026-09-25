@@ -16,11 +16,15 @@
  *  - The round-trip is lossy in the ways Markdown itself is ambiguous. Trailing
  *    "  " hard breaks, "setext" headings, and reference links come back in ATX
  *    / inline form. Formatting survives; exact bytes do not.
- *  - The whole document is re-rendered on each settled edit, so a caret sitting
- *    inside syntax that the parser consumed (`## ` becoming a heading) drifts by
- *    the width of the markers. Typing at the end of a line, which is the normal
- *    case, is unaffected. Typora solves this by revealing the raw source of the
- *    active block; that is the natural next step here.
+ *  - The whole document is re-rendered on each settled edit, which wipes the
+ *    caret along with it. The caret is put back from a sentinel character left
+ *    in the text (see SENTINEL) rather than a numeric offset, so it survives the
+ *    parser consuming syntax underneath it — editing the middle of a word that
+ *    the last keystroke turned into a heading keeps the caret in that word. A
+ *    caret that lands at the end of a formatting run is also pushed back out of
+ *    it, so the next character typed does not silently inherit the formatting.
+ *    What is still lost: the browser's own undo history (see below), and any
+ *    text selection spanning more than one block.
  *  - Undo is ours, not the browser's: re-rendering wipes the native
  *    contenteditable history, so this module keeps a small Markdown snapshot
  *    stack and handles Mod-z / Mod-Shift-z itself.
@@ -199,7 +203,72 @@ function writeCaret(host, position) {
 // and everything typed next then inherits that formatting. An empty text node
 // is the only position inside a block that is unambiguously "after the run".
 const ZWSP = '\u200b';
+
+// A second, distinct non-printing character used to carry the caret's position
+// through a re-render. A numeric offset only survives while the parser leaves
+// the text around the caret alone; when it consumes syntax (typing `## ` turns
+// a paragraph into a heading, and the two spaces it swallowed are no longer
+// characters to count) every offset after the change is wrong and the caret
+// lands somewhere else. A character *in* the text moves with the content no
+// matter what the parser does to the markup, so it is position-independent by
+// construction. U+2060 WORD JOINER is invisible, is not in the set Turndown
+// escapes, and marked parses it as ordinary text.
+const SENTINEL = '\u2060';
 const INLINE_RE = /^(STRONG|EM|B|I|CODE|A|DEL|S|INS|MARK|U|SPAN|SUB|SUP)$/;
+
+/** Drop a sentinel at the caret, so the position can be found again after
+ * the document is re-rendered. Returns false when there is no caret to mark. */
+function insertSentinel(host) {
+  const range = currentRange(host);
+  if (!range) return false;
+  const gap = document.createRange();
+  gap.setStart(range.startContainer, range.startOffset);
+  gap.collapse(true);
+  gap.insertNode(document.createTextNode(SENTINEL));
+  return true;
+}
+
+/** Find the sentinel in freshly rendered HTML, put the caret where it sits,
+ * and remove it. Returns false if it did not survive, so the caller can fall
+ * back to the numeric position. */
+function takeSentinel(host) {
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    const at = node.nodeValue.indexOf(SENTINEL);
+    if (at >= 0) {
+      const range = document.createRange();
+      if (at === 0) {
+        node.deleteData(0, SENTINEL.length);
+        range.setStart(node, 0);
+      } else {
+        const tail = node.splitText(at);
+        tail.deleteData(0, SENTINEL.length);
+        range.setStart(node, at);
+      }
+      range.collapse(true);
+      const sel = document.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return true;
+    }
+    node = walker.nextNode();
+  }
+  return false;
+}
+
+/** Remove every sentinel without moving the caret. Used when the round-trip
+ * turned out to be a no-op and the DOM is not being re-rendered. */
+function stripSentinel(host) {
+  const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+  let node = walker.nextNode();
+  while (node) {
+    if (node.nodeValue.includes(SENTINEL)) {
+      node.nodeValue = node.nodeValue.split(SENTINEL).join('');
+    }
+    node = walker.nextNode();
+  }
+}
 
 /** If the caret sits at the very end of a trailing inline run (`<strong>` etc.),
  * move it to a zero-width space just after that run. Without this, repainting
@@ -315,14 +384,24 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange }) {
     }
   }
 
-  function paint(body, position) {
+  // `position` is the numeric fallback, used when there is no sentinel or the
+  // sentinel did not survive. `sentinel` says the body still carries one.
+  function paint(body, position, sentinel) {
     const scrollTop = host.scrollTop;
     repainting = true;
     host.innerHTML = renderMarkdown(body);
     repainting = false;
     makeSelectable();
     painted = body;
-    if (position) {
+    if (sentinel) {
+      // The sentinel rode through the render, so it knows exactly where the
+      // caret was. Fall back to the offset only if it is unexpectedly gone.
+      if (!takeSentinel(host)) writeCaret(host, position);
+      // The caret may have landed at the end of a formatting run, which would
+      // silently bold the next thing typed.
+      escapeInlineTail(host);
+      host.scrollTop = scrollTop;
+    } else if (position) {
       writeCaret(host, position);
       // Only restore scroll when the caret was restored: mounting a note should
       // start at the top of the document.
@@ -342,14 +421,26 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange }) {
     clearTimeout(settleTimer);
     settleTimer = null;
     const position = readCaret(host);
+    // Mark the caret before serializing, for the reason on SENTINEL.
+    const tagged = insertSentinel(host);
     const md = tidy(getSerializer().turndown(host.innerHTML));
-    if (md === painted) return;
-    undoStack.push({ body: painted, caret: lastCaret });
+    if (md === painted) {
+      // The round-trip was a no-op (typing inside a fenced code block, say):
+      // leave the DOM alone, just take the marker back out.
+      if (tagged) {
+        stripSentinel(host);
+        writeCaret(host, position);
+      }
+      return;
+    }
+    undoStack.push({ body: painted, caret: position });
     if (undoStack.length > UNDO_LIMIT) undoStack.shift();
     redoStack.length = 0;
-    painted = md;
-    onBodyChange(md);
-    paint(md, position);
+    paint(md, position, tagged);
+    // The DOM is sentinel-free by now, so what is published must be too.
+    // Publishing before the paint would leak the marker into note.body.
+    painted = md.split(SENTINEL).join('');
+    onBodyChange(painted);
   }
 
   function schedule() {
