@@ -624,7 +624,7 @@ a.tag-chip:hover {
 }
 
 .mode-switch .btn:not(.active):hover {
-  background: var(--surface-elevated);
+  background: var(--accent-soft);
 }
 
 /* Split view: editor and live preview side by side, each scrollable */
@@ -660,6 +660,33 @@ a.tag-chip:hover {
     border-top: 1px solid var(--border);
     padding-top: 12px;
   }
+}
+
+/* Write mode (T35): the rendered document is the editing surface, so the
+ * source editor and read-only preview are hidden and the contenteditable
+ * takes over. It is the same full width as the source editor, so the only
+ * difference from Edit is the font — Markdown body styling, not monospace. */
+.editor-body.write .cm-host {
+  display: none;
+}
+.editor-body.write .preview {
+  display: none;
+}
+.editor-body.write .wysiwyg-host {
+  display: block;
+  min-height: 60vh;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 32px 120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  line-height: 1.7;
+  outline: none;
+}
+.editor-body.write .wysiwyg-host:focus-visible {
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 .preview {

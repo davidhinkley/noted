@@ -57,8 +57,18 @@ Naming these gaps is deliberate. The default failure mode of a coding agent is t
 ### UI
 
 - The editor is **swappable**. Today it is a CodeMirror 6 view behind `js/ui/editor.js` — the **only** file allowed to import CodeMirror. Never couple storage, rendering, or export to a specific editor component.
-- The Markdown **formatting toolbar** lives in `index.html` and delegates to `formatAction(name)` in `js/ui/app.js`, which forwards to `editor.runAction(name)`. All buffer mutation stays inside `js/ui/editor.js`; toolbar actions dispatch annotated `userEvent` edits so the normal debounced save and undo history apply. Toolbar is hidden in preview.
-- The **view mode** (Edit / Split / Preview) is controlled by `mode: 'edit' | 'split' | 'preview'` in `js/ui/app.js`, cycled via `togglePreview()` (Ctrl+E). In Split mode the editor and live preview render side-by-side in a CSS grid; the preview pane is a scrollable region with proportional scroll sync so both panes track each other. The setting is persisted as `defaultView` (renamed from `defaultPreview` for T28) in localStorage.
+- The Markdown **formatting toolbar** lives in `index.html` and delegates to `formatAction(name)` in `js/ui/app.js`, which forwards to `editor.runAction(name)` (or `wysiwyg.runAction(name)` in Write mode). All buffer mutation stays inside the editor wrappers; toolbar actions dispatch annotated `userEvent` edits so the normal debounced save and undo history apply. Toolbar is hidden in preview.
+- The **view mode** (Edit / Split / Write / Preview) is controlled by `mode: 'edit' | 'split' | 'write' | 'preview'` in `js/ui/app.js`, cycled via `togglePreview()` (Ctrl+E). In Split mode the editor and live preview render side-by-side in a CSS grid with proportional scroll sync. **Write** mode (`js/ui/wysiwyg.js`) is a contenteditable that round-trips to Markdown — it emits raw Markdown on every settled edit, so `note.body` stays raw Markdown and the database never sees HTML (D4). It is a second implementation behind the same swappable seam, so storage, search, and export stay editor-agnostic. The setting is persisted as `defaultView` in localStorage.
+
+### The Write-mode editor (`js/ui/wysiwyg.js`)
+
+Write mode mounts a contenteditable that renders the note via `marked` + `DOMPurify` and serializes back to Markdown via `Turndown` (+ the gfm bundle for tables, task lists, strikethrough) on every settled edit. It hands the rest of the app nothing but a Markdown string, exactly like the CodeMirror wrapper.
+
+- Two editors share one buffer. When **leaving** Write mode, `setMode` flushes the pending edit and pushes the Markdown back into CodeMirror (`setDoc`). When **entering**, `ensureCaret()` re-places the caret because the surface painted while hidden.
+- `note.body` is written through `onBodyChange` → `touch()`, so the normal debounced save applies. Nothing here bypasses the storage boundary.
+- The round-trip is **lossy where Markdown is ambiguous** (trailing "  " hard breaks, setext headings, reference links). Formatting survives; exact bytes do not. This is a known, documented limitation, not a bug to chase.
+- Undo is the module's own snapshot stack: re-rendering wipes the browser's contenteditable history.
+- The surface is the mount element itself (as in `editor.js`), **not** a wrapper div — a nested div would make `querySelector('.wysiwyg-host')` resolve to the wrong node and swallow every keystroke.
 
 ### Process
 

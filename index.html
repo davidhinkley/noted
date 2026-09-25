@@ -17,6 +17,11 @@
   <script defer src="https://cdn.jsdelivr.net/npm/fuse.js@7.1.0/dist/fuse.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js"></script>
+  <!-- WYSIWYG "Write" mode (T35): the inverse of marked. turndown serializes the
+       edited DOM back to Markdown; the gfm bundle adds tables, strikethrough,
+       task lists and highlighted code so GFM survives the round-trip. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/turndown@7.2.0/dist/turndown.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/turndown-plugin-gfm@1.0.2/dist/turndown-plugin-gfm.js"></script>
   <!-- Alpine is an ES module imported by js/ui/app.js, so components register
        before Alpine.start() runs. The UMD build auto-starts on its own microtask,
        before later <script type="module"> files execute. -->
@@ -255,6 +260,7 @@
               <select x-model="settings.defaultView" @change="applySettings()">
                 <option value="edit">Edit mode</option>
                 <option value="split">Split (edit + preview)</option>
+                <option value="write">Write mode</option>
                 <option value="preview">Preview mode</option>
               </select>
             </label>
@@ -305,6 +311,7 @@
             <div class="mode-switch" role="group" aria-label="View mode">
               <button type="button" class="btn" :class="{ active: mode === 'edit' }" @click="setMode('edit')" title="Editor only">Edit</button>
               <button type="button" class="btn" :class="{ active: mode === 'split' }" @click="setMode('split')" title="Editor and live preview side by side (Ctrl+E)">Split</button>
+              <button type="button" class="btn" :class="{ active: mode === 'write' }" @click="setMode('write')" title="Write in the rendered document (Ctrl+E)">Write</button>
               <button type="button" class="btn" :class="{ active: mode === 'preview' }" @click="setMode('preview')" title="Rendered preview only">Preview</button>
             </div>
             <button type="button" class="btn" @click="exportMD()">.md</button>
@@ -367,6 +374,14 @@
               @scroll="_syncFrom($refs.preview, _editorScroll)"
               x-html="rendered"
             ></article>
+            <!-- Write mode (T35): the rendered document is the editing surface.
+                 It is mounted once alongside the source editor and stays hidden
+                 in the other modes, so it survives note→note navigation. -->
+            <div
+              class="wysiwyg-host"
+              x-show="mode === 'write'"
+              x-init="mountWysiwyg($el)"
+            ></div>
           </div>
 
           <div class="attachments">

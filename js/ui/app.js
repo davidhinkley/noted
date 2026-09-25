@@ -23,6 +23,7 @@ import {
 } from '../crypto.js';
 import { importJSON } from '../io/import.js';
 import { createMarkdownEditor } from './editor.js';
+import { createWysiwygEditor } from './wysiwyg.js';
 import { loadSettings, saveSettings, applySettings, DEFAULT_SETTINGS, FONT_SIZES, VIEW_MODES } from './settings.js';
 
 const SAVE_DEBOUNCE_MS = 400;
@@ -60,10 +61,11 @@ document.addEventListener('alpine:init', () => {
     notes: [],
     query: '',
     note: null, // editor draft: { id, title, body, tagsInput, createdAt, updatedAt }
-    mode: 'edit', // 'edit' | 'split' | 'preview' — see ui/settings.js VIEW_MODES (T28)
+    mode: 'edit', // see ui/settings.js VIEW_MODES: 'edit' | 'split' | 'write' | 'preview'
     saveState: 'saved', // 'saved' | 'dirty' | 'saving'
     _saveTimer: null,
     editor: null, // CodeMirror wrapper (ui/editor.js); null outside the note route
+    wysiwyg: null, // Write-mode wrapper (ui/wysiwyg.js); null outside the note route
     settings: null, // loaded in init(); see ui/settings.js (T23)
     folders: [], // folder records (T24); loaded on demand for the folders view + editor select
     folderCounts: {}, // { [folderId]: noteCount } for the folders view
@@ -88,14 +90,20 @@ document.addEventListener('alpine:init', () => {
       applySettings(this.settings);
       this.vault.enabled = vaultEnabled();
       startRouter(async (route) => {
-        // Flush pending edits before leaving the editor.
+        // Flush pending edits before leaving the editor. Write mode debounces
+        // its own commits, so it has to be drained before the save reads the body.
         if (this.route.name === 'note' && route.name !== 'note') {
+          if (this.wysiwyg) this.wysiwyg.flush();
           await this.saveNow();
         }
         if (route.name !== 'note' && this.editor) {
           this.editor.destroy();
           this.editor = null;
           this._editorScroll = null;
+        }
+        if (route.name !== 'note' && this.wysiwyg) {
+          this.wysiwyg.destroy();
+          this.wysiwyg = null;
         }
         if (route.name === 'note') this.query = '';
         this.route = route;
@@ -126,12 +134,34 @@ document.addEventListener('alpine:init', () => {
       });
     },
 
-    // Markdown formatting toolbar (D4/D8). The app never touches CodeMirror
-    // directly; the wrapper owns the buffer mutation and we just name an action.
-    // The resulting edit flows back through onDocChange, so save/undo are normal.
+    // Write mode (T35): the second implementation behind the swappable-editor
+    // seam. It owns a contenteditable and round-trips to Markdown, so the rest
+    // of the app sees the same `body` string the source editor produces. It is
+    // mounted alongside the source editor and stays hidden in the other modes,
+    // which is why its buffer is synced explicitly on the way out (setMode).
+    mountWysiwyg(el) {
+      if (this.wysiwyg) return;
+      this.wysiwyg = createWysiwygEditor(el, {
+        getBody: () => (this.note ? this.note.body : ''),
+        onBodyChange: (body) => {
+          if (!this.note) return;
+          this.note.body = body;
+          this.touch();
+        },
+      });
+    },
+
+    // Markdown formatting toolbar (D4/D8). The app never touches an editor
+    // directly; each wrapper owns the buffer mutation and we just name an action.
+    // The resulting edit flows back through the wrapper's change callback, so
+    // save is normal. Write mode maps the same action names onto the
+    // contenteditable, so one toolbar serves both editors.
     formatAction(name) {
-      if (!this.editor) return;
-      this.editor.runAction(name);
+      if (this.mode === 'write') {
+        if (this.wysiwyg) this.wysiwyg.runAction(name);
+        return;
+      }
+      if (this.editor) this.editor.runAction(name);
     },
 
     // Keyboard shortcuts (T22): Ctrl/Cmd+N new, +S save, +E view mode, +K search.
@@ -344,6 +374,9 @@ document.addEventListener('alpine:init', () => {
       // If the editor is already mounted (note→note navigation, e.g. Ctrl+N),
       // swap its document in place. A fresh mount reads getDoc() instead.
       if (this.editor) this.editor.setDoc(this.note.body || '');
+      // The Write-mode surface is mounted once and survives note→note
+      // navigation, so it needs the same explicit body swap.
+      if (this.wysiwyg) this.wysiwyg.setBody(this.note.body || '');
       this.attachments = await db.listAttachments(id);
     },
 
@@ -395,16 +428,27 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    // Three view modes (T28). 'split' is the word-processor layout: editor on
-    // the left, live-rendered preview on the right, updating as you type.
+    // View modes (T28/T35). 'write' is the WYSIWYG surface; 'split' is the
+    // word-processor layout with the source editor and live preview side by side.
     setMode(mode) {
       if (!VIEW_MODES.includes(mode)) return;
+      // Leaving Write mode: drain its debounced edit and push the Markdown back
+      // into the source editor, which has been sitting on a stale buffer. The
+      // reverse direction (entering Write) is handled by mountWysiwyg reading
+      // getBody() at mount time.
+      if (this.mode === 'write' && mode !== 'write' && this.wysiwyg) {
+        this.wysiwyg.flush();
+        if (this.editor) this.editor.setDoc(this.note ? this.note.body : '');
+      }
       this.mode = mode;
       // A hidden CodeMirror view has no layout, so coming back from 'preview'
       // needs a re-measure before the scroll ratio below means anything.
       this.$nextTick(() => {
         if (this.editor) this.editor.view.requestMeasure();
         this._syncScroll();
+        // The Write surface paints while hidden, so its caret is never placed.
+        // Re-place it now that it is visible, or execCommand has nothing to act on.
+        if (mode === 'write' && this.wysiwyg) this.wysiwyg.ensureCaret();
       });
     },
 

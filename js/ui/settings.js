@@ -10,8 +10,10 @@
 
 export const STORAGE_KEY = 'noted.settings';
 
-// View modes for the note editor (T28). Order is the Ctrl+E cycle order.
-export const VIEW_MODES = ['edit', 'split', 'preview'];
+// View modes for the note editor. Order is the Ctrl+E cycle order.
+// 'write' is the WYSIWYG surface (T35): the rendered document is the editing
+// surface, so Markdown markers are hidden while you write.
+export const VIEW_MODES = ['edit', 'split', 'write', 'preview'];
 
 export const DEFAULT_SETTINGS = {
   theme: 'system',
