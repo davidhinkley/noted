@@ -258,10 +258,8 @@
             <label class="settings-row">
               <span>Open a note in</span>
               <select x-model="settings.defaultView" @change="applySettings()">
-                <option value="edit">Edit mode</option>
-                <option value="split">Split (edit + preview)</option>
-                <option value="write">Write mode</option>
-                <option value="preview">Preview mode</option>
+                <option value="edit">Edit (rendered)</option>
+                <option value="code">Code (raw Markdown)</option>
               </select>
             </label>
 
@@ -309,10 +307,8 @@
             <span class="save-state" x-text="saveLabel"></span>
             <span class="editor-bar-spacer"></span>
             <div class="mode-switch" role="group" aria-label="View mode">
-              <button type="button" class="btn" :class="{ active: mode === 'edit' }" @click="setMode('edit')" title="Editor only">Edit</button>
-              <button type="button" class="btn" :class="{ active: mode === 'split' }" @click="setMode('split')" title="Editor and live preview side by side (Ctrl+E)">Split</button>
-              <button type="button" class="btn" :class="{ active: mode === 'write' }" @click="setMode('write')" title="Write in the rendered document (Ctrl+E)">Write</button>
-              <button type="button" class="btn" :class="{ active: mode === 'preview' }" @click="setMode('preview')" title="Rendered preview only">Preview</button>
+              <button type="button" class="btn" :class="{ active: mode === 'edit' }" @click="setMode('edit')" title="Write in the rendered document (Ctrl+E)">Edit</button>
+              <button type="button" class="btn" :class="{ active: mode === 'code' }" @click="setMode('code')" title="Edit the raw Markdown source (Ctrl+E)">Code</button>
             </div>
             <button type="button" class="btn" @click="exportMD()">.md</button>
             <button type="button" class="btn danger" @click="removeNote()">Delete</button>
@@ -345,7 +341,7 @@
             </template>
           </select>
 
-          <div class="md-toolbar" x-show="mode !== 'preview'" @mousedown.prevent>
+          <div class="md-toolbar" @mousedown.prevent>
             <button type="button" class="md-btn" @click="formatAction('bold')" title="Bold (Ctrl+B)"><strong>B</strong></button>
             <button type="button" class="md-btn" @click="formatAction('italic')" title="Italic (Ctrl+I)"><em>I</em></button>
             <button type="button" class="md-btn" @click="formatAction('strike')" title="Strikethrough"><s>S</s></button>
@@ -366,20 +362,13 @@
           </div>
 
           <div class="editor-body" :class="mode">
-            <div class="cm-host" x-show="mode !== 'preview'" x-init="mountEditor($el)"></div>
-            <article
-              class="preview markdown-body"
-              x-ref="preview"
-              x-show="mode !== 'edit'"
-              @scroll="_syncFrom($refs.preview, _editorScroll)"
-              x-html="rendered"
-            ></article>
-            <!-- Write mode (T35): the rendered document is the editing surface.
+            <div class="cm-host" x-show="mode === 'code'" x-init="mountEditor($el)"></div>
+            <!-- Edit mode (T36): the rendered document is the editing surface.
                  It is mounted once alongside the source editor and stays hidden
-                 in the other modes, so it survives note→note navigation. -->
+                 in Code mode, so it survives note→note navigation. -->
             <div
               class="wysiwyg-host"
-              x-show="mode === 'write'"
+              x-show="mode === 'edit'"
               x-init="mountWysiwyg($el)"
             ></div>
           </div>

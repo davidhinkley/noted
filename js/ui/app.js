@@ -61,7 +61,7 @@ document.addEventListener('alpine:init', () => {
     notes: [],
     query: '',
     note: null, // editor draft: { id, title, body, tagsInput, createdAt, updatedAt }
-    mode: 'edit', // see ui/settings.js VIEW_MODES: 'edit' | 'split' | 'write' | 'preview'
+    mode: 'edit', // see ui/settings.js VIEW_MODES: 'edit' (WYSIWYG) | 'code' (raw Markdown)
     saveState: 'saved', // 'saved' | 'dirty' | 'saving'
     _saveTimer: null,
     editor: null, // CodeMirror wrapper (ui/editor.js); null outside the note route
@@ -99,7 +99,6 @@ document.addEventListener('alpine:init', () => {
         if (route.name !== 'note' && this.editor) {
           this.editor.destroy();
           this.editor = null;
-          this._editorScroll = null;
         }
         if (route.name !== 'note' && this.wysiwyg) {
           this.wysiwyg.destroy();
@@ -127,18 +126,13 @@ document.addEventListener('alpine:init', () => {
           this.touch();
         },
       });
-      // Kept for scroll sync only (T28); the editor still owns its own DOM.
-      this._editorScroll = this.editor.view.scrollDOM;
-      this._editorScroll.addEventListener('scroll', () => {
-        this._syncFrom(this._editorScroll, this.$refs.preview);
-      });
     },
 
-    // Write mode (T35): the second implementation behind the swappable-editor
+    // WYSIWYG surface (T36): the second implementation behind the swappable-editor
     // seam. It owns a contenteditable and round-trips to Markdown, so the rest
     // of the app sees the same `body` string the source editor produces. It is
     // mounted alongside the source editor and stays hidden in the other modes,
-    // which is why its buffer is synced explicitly on the way out (setMode).
+    // which is why its buffer is handed over explicitly on the way out (setMode).
     mountWysiwyg(el) {
       if (this.wysiwyg) return;
       this.wysiwyg = createWysiwygEditor(el, {
@@ -157,7 +151,7 @@ document.addEventListener('alpine:init', () => {
     // save is normal. Write mode maps the same action names onto the
     // contenteditable, so one toolbar serves both editors.
     formatAction(name) {
-      if (this.mode === 'write') {
+      if (this.mode === 'edit') {
         if (this.wysiwyg) this.wysiwyg.runAction(name);
         return;
       }
@@ -268,12 +262,6 @@ document.addEventListener('alpine:init', () => {
       if (bytes >= 1 << 20) return `${(bytes / (1 << 20)).toFixed(1)} MB`;
       if (bytes >= 1 << 10) return `${(bytes / (1 << 10)).toFixed(1)} KB`;
       return `${Math.round(bytes)} B`;
-    },
-
-    get rendered() {
-      if (!this.note) return '';
-      const html = marked.parse(this.note.body, { async: false, gfm: true, breaks: true });
-      return DOMPurify.sanitize(html);
     },
 
     async loadRoute() {
@@ -428,56 +416,41 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    // View modes (T28/T35). 'write' is the WYSIWYG surface; 'split' is the
-    // word-processor layout with the source editor and live preview side by side.
+    // View modes (T37). 'edit' is the WYSIWYG surface, 'code' the raw-Markdown
+    // source editor. Two editors share one buffer, so every hand-off is explicit
+    // rather than inferred: leaving the WYSIWYG side drains its debounced edit
+    // and pushes the result into CodeMirror, which has been sitting on a stale
+    // buffer for as long as the WYSIWYG surface was mounted.
     setMode(mode) {
       if (!VIEW_MODES.includes(mode)) return;
-      // Leaving Write mode: drain its debounced edit and push the Markdown back
-      // into the source editor, which has been sitting on a stale buffer. The
-      // reverse direction (entering Write) is handled by mountWysiwyg reading
-      // getBody() at mount time.
-      if (this.mode === 'write' && mode !== 'write' && this.wysiwyg) {
+      if (mode === this.mode) return;
+      // Leaving the WYSIWYG surface: commit, then hand the Markdown over.
+      if (this.mode === 'edit' && this.wysiwyg) {
         this.wysiwyg.flush();
         if (this.editor) this.editor.setDoc(this.note ? this.note.body : '');
       }
+      // Entering it: pull CodeMirror's buffer back in. The WYSIWYG surface is
+      // mounted once and stays alive across mode switches, so it is still
+      // holding whatever it last painted — without this, edits made in Code
+      // mode do not appear when you switch back.
+      if (mode === 'edit' && this.wysiwyg && this.note) {
+        this.wysiwyg.setBody(this.note.body || '');
+      }
       this.mode = mode;
-      // A hidden CodeMirror view has no layout, so coming back from 'preview'
-      // needs a re-measure before the scroll ratio below means anything.
       this.$nextTick(() => {
+        // A hidden CodeMirror view has no layout, so it needs a re-measure
+        // before it can paint or take focus.
         if (this.editor) this.editor.view.requestMeasure();
-        this._syncScroll();
-        // The Write surface paints while hidden, so its caret is never placed.
-        // Re-place it now that it is visible, or execCommand has nothing to act on.
-        if (mode === 'write' && this.wysiwyg) this.wysiwyg.ensureCaret();
+        // The WYSIWYG surface paints while hidden, so its caret was never
+        // placed. Re-place it now that it is visible, or execCommand has
+        // nothing to act on and the first keystroke is lost.
+        if (mode === 'edit' && this.wysiwyg) this.wysiwyg.ensureCaret();
       });
     },
 
-    // Ctrl+E cycles edit → split → preview → edit.
+    // Ctrl+E toggles the two surfaces.
     togglePreview() {
       this.setMode(VIEW_MODES[(VIEW_MODES.indexOf(this.mode) + 1) % VIEW_MODES.length]);
-    },
-
-    // Proportional scroll sync between editor and preview (T28). Only in split
-    // mode — the other modes have a single pane, so there is nothing to pair.
-    // The lock stops a scroll echoed back from re-triggering its partner.
-    _syncLock: false,
-
-    _syncFrom(src, dst) {
-      if (this.mode !== 'split' || this._syncLock || !src || !dst) return;
-      const srcMax = src.scrollHeight - src.clientHeight;
-      const dstMax = dst.scrollHeight - dst.clientHeight;
-      if (srcMax <= 0 || dstMax <= 0) return;
-      this._syncLock = true;
-      dst.scrollTop = (src.scrollTop / srcMax) * dstMax;
-      requestAnimationFrame(() => {
-        this._syncLock = false;
-      });
-    },
-
-    _syncScroll() {
-      if (this.mode !== 'split') return;
-      const pv = this.$refs.preview;
-      if (pv && this._editorScroll) this._syncFrom(pv, this._editorScroll);
     },
 
     async goBack() {

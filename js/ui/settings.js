@@ -11,9 +11,17 @@
 export const STORAGE_KEY = 'noted.settings';
 
 // View modes for the note editor. Order is the Ctrl+E cycle order.
-// 'write' is the WYSIWYG surface (T35): the rendered document is the editing
-// surface, so Markdown markers are hidden while you write.
-export const VIEW_MODES = ['edit', 'split', 'write', 'preview'];
+//
+// 'edit' is the WYSIWYG surface (T36): the rendered document IS the editing
+// surface, so Markdown markers are hidden while you write and there is no
+// separate preview to look at. 'code' is the raw-Markdown source editor
+// (CodeMirror) for when you want to see or hand-edit the syntax itself.
+//
+// Split and Preview were retired in T37. Both were scaffolding for the idea
+// that a writer needs the rendered result beside the source; once Write mode
+// renders as you type, Preview is just Write with the cursor hidden and Split
+// is just two panes of the same document.
+export const VIEW_MODES = ['edit', 'code'];
 
 export const DEFAULT_SETTINGS = {
   theme: 'system',
@@ -33,10 +41,23 @@ export function loadSettings() {
     if (FONT_SIZES.includes(Number(raw.editorFontSize))) {
       s.editorFontSize = String(Number(raw.editorFontSize));
     }
-    // `defaultPreview` predates the split mode (T28) and held only
-    // 'edit'|'preview'. Read it as a fallback so an existing preference is
-    // carried over by the rename rather than silently reset.
-    const view = raw.defaultView ?? raw.defaultPreview;
+    // Settings migration. 'edit' used to mean the raw-Markdown source editor
+    // and still does in name only — it now means the WYSIWYG surface, so
+    // carrying an old 'edit' straight over would silently move a user who
+    // asked for the source view onto a rendered one. Map the old meanings
+    // explicitly instead of relying on the name:
+    //   old 'edit'    (raw source)     -> 'code'   (the same surface)
+    //   old 'write'   (WYSIWYG)         -> 'edit'
+    //   old 'split'/'preview' (rendered)-> 'edit'   (closest match)
+    // 'defaultPreview' predates all of this and held only 'edit'|'preview'.
+    const LEGACY_VIEW = {
+      edit: 'code',
+      write: 'edit',
+      split: 'edit',
+      preview: 'edit',
+    };
+    const rawView = raw.defaultView ?? raw.defaultPreview;
+    const view = rawView == null ? undefined : LEGACY_VIEW[rawView] ?? rawView;
     if (VIEW_MODES.includes(view)) {
       s.defaultView = view;
     }

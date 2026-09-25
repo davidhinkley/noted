@@ -627,70 +627,34 @@ a.tag-chip:hover {
   background: var(--accent-soft);
 }
 
-/* Split view: editor and live preview side by side, each scrollable */
-.editor-body.split {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  align-items: start;
-}
-
-.editor-body.split .cm-host .cm-editor {
-  height: 56vh;
-}
-
-.editor-body.split .preview {
-  min-height: 56vh;
-  max-height: 56vh;
-  padding-left: 16px;
-  border-left: 1px solid var(--border);
-  overflow-y: auto;
-}
-
-/* Responsive: stack on narrow screens */
-@media (max-width: 760px) {
-  .editor-body.split {
-    grid-template-columns: 1fr;
-  }
-  .editor-body.split .preview {
-    min-height: 40vh;
-    max-height: 40vh;
-    padding-left: 0;
-    border-left: none;
-    border-top: 1px solid var(--border);
-    padding-top: 12px;
-  }
-}
-
-/* Write mode (T35): the rendered document is the editing surface, so the
- * source editor and read-only preview are hidden and the contenteditable
- * takes over. It is the same full width as the source editor, so the only
- * difference from Edit is the font — Markdown body styling, not monospace. */
-.editor-body.write .cm-host {
+/* Edit mode (T36): the WYSIWYG surface is the editing surface, so the raw
+ * source editor is hidden and the contenteditable takes over. The rendered
+ * document is a page, not a code pane, so it is centred at a readable measure
+ * and typed in a body face rather than the monospace of the source editor. */
+.editor-body.edit .cm-host {
   display: none;
 }
-.editor-body.write .preview {
-  display: none;
-}
-.editor-body.write .wysiwyg-host {
+.editor-body.edit .wysiwyg-host {
   display: block;
   min-height: 60vh;
-  max-width: 760px;
+  max-width: 46rem;
   margin: 0 auto;
-  padding: 24px 32px 120px;
+  padding: 1.5rem 2rem 7rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   line-height: 1.7;
   outline: none;
 }
-.editor-body.write .wysiwyg-host:focus-visible {
+.editor-body.edit .wysiwyg-host:focus-visible {
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
-.preview {
-  min-height: 40vh;
+@media (max-width: 760px) {
+  .editor-body.edit .wysiwyg-host {
+    padding: 1rem 1rem 5rem;
+    border-radius: 8px;
+  }
 }
 
 .markdown-body h1,
