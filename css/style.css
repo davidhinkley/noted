@@ -520,6 +520,43 @@ a.tag-chip:hover {
   font-size: 0.82rem;
 }
 
+/* Markdown formatting toolbar (D4/D8). Buttons act on the CodeMirror buffer
+   via the editor wrapper; the preview is untouched. */
+.md-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.md-btn {
+  min-width: 30px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+.md-btn:hover {
+  border-color: var(--accent);
+}
+
+.md-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 3px;
+  background: var(--border);
+}
+
 .title-input,
 .tags-input {
   display: block;

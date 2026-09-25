@@ -10,7 +10,7 @@
  * is duplicated across the graph.
  */
 
-import { EditorState } from '@codemirror/state';
+import { EditorState, EditorSelection } from '@codemirror/state';
 import {
   EditorView,
   keymap,
@@ -63,9 +63,180 @@ const notedTheme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground, ::selection': {
     backgroundColor: 'var(--accent-soft)',
   },
-  '.cm-placeholder': { color: 'var(--muted)' },
+'.cm-placeholder': { color: 'var(--muted)' },
 });
 
+function isUserEdit(update) {
+  if (!update.docChanged) return false;
+  return update.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('undo') || t.isUserEvent('redo'));
+}
+
+// Everything the formatting toolbar dispatches is annotated as a user 'input'
+// event, so isUserEdit fires the debounced save and history collapses each
+// action to one undo step. Without the annotation these edits would be
+// invisible to the save path.
+const FORMAT_EVENT = 'input.format';
+
+// Wrap the selection in inline markers. With no selection, insert the pair and
+// leave the caret between the markers.
+function wrapSelection(view, before, after) {
+  const changes = view.state.changeByRange((range) => {
+    const selected = view.state.sliceDoc(range.from, range.to);
+    if (!selected) {
+      return {
+        changes: { from: range.from, insert: before + after },
+        range: EditorSelection.cursor(range.from + before.length),
+      };
+    }
+    return {
+      changes: { from: range.from, to: range.to, insert: before + selected + after },
+      range: EditorSelection.range(range.from + before.length, range.to + before.length),
+    };
+  });
+  view.dispatch(changes, { userEvent: FORMAT_EVENT });
+  view.focus();
+}
+
+// The unique set of lines touched by the current selection(s). A Map keyed by
+// line start keeps overlapping selections from emitting duplicate changes,
+// which CodeMirror rejects.
+function targetLines(state) {
+  const lines = new Map();
+  for (const range of state.selection.ranges) {
+    const first = state.doc.lineAt(range.from).number;
+    const last = state.doc.lineAt(range.to).number;
+    for (let n = first; n <= last; n++) {
+      const line = state.doc.line(n);
+      lines.set(line.from, line);
+    }
+  }
+  return [...lines.values()];
+}
+
+function dispatchLineChanges(view, edits) {
+  if (!edits.length) return;
+  view.dispatch({ changes: edits, userEvent: FORMAT_EVENT });
+  view.focus();
+}
+
+// Headings are mutually exclusive: H2 on an H1 line replaces the marker rather
+// than stacking one. Pressing the current level clears the heading.
+function setHeading(view, level) {
+  const prefix = `${'#'.repeat(level)} `;
+  const edits = targetLines(view.state).map((line) => {
+    const m = /^(#{1,6})\s+/.exec(line.text);
+    const rest = line.text.slice(m ? m[0].length : 0);
+    const isSame = m && m[1].length === level;
+    return { from: line.from, to: line.to, insert: isSame ? rest : prefix + rest };
+  });
+  dispatchLineChanges(view, edits);
+}
+
+// Toggle a uniform per-line prefix (blockquote). If every target line already
+// carries it, remove it; otherwise add it to the lines missing it.
+function toggleLinePrefix(view, prefix) {
+  const lines = targetLines(view.state);
+  const allPrefixed = lines.length > 0 && lines.every((l) => l.text.startsWith(prefix));
+  const edits = [];
+  for (const line of lines) {
+    const has = line.text.startsWith(prefix);
+    if (allPrefixed) {
+      edits.push({ from: line.from, to: line.from + prefix.length, insert: '' });
+    } else if (!has) {
+      edits.push({ from: line.from, to: line.from, insert: prefix });
+    }
+  }
+  dispatchLineChanges(view, edits);
+}
+
+// Any existing list marker, bullet or ordered, so switching list types replaces
+// rather than stacks ("- x" → "1. x", not "1. - x").
+const LIST_ITEM_RE = /^(?:[-*+]|\d+\.)\s+/;
+
+// Bullet and ordered lists share this: strip whatever marker is present, then
+// apply the target type (numbering across the selection). Pressing the active
+// type on an all-of-type selection removes the marker.
+function setListType(view, kind) {
+  const lines = targetLines(view.state);
+  const markerRe = kind === 'ol' ? /^\d+\.\s+/ : /^[-*+]\s+/;
+  const allMatch = lines.length > 0 && lines.every((l) => markerRe.test(l.text));
+  const edits = [];
+  let n = 1;
+  for (const line of lines) {
+    const body = line.text.replace(LIST_ITEM_RE, '');
+    if (allMatch) {
+      edits.push({ from: line.from, to: line.to, insert: body });
+    } else {
+      const prefix = kind === 'ol' ? `${n}. ` : '- ';
+      edits.push({ from: line.from, to: line.to, insert: prefix + body });
+      n += 1;
+    }
+  }
+  dispatchLineChanges(view, edits);
+}
+
+// Fenced block / horizontal rule. The selection (if any) becomes the body and
+// the caret lands inside it; otherwise the caret lands on the empty middle line.
+function insertBlock(view, open, close) {
+  const changes = view.state.changeByRange((range) => {
+    const selected = view.state.sliceDoc(range.from, range.to);
+    const insert = open + selected + close;
+    const start = range.from + open.length;
+    return {
+      changes: { from: range.from, to: range.to, insert },
+      range: EditorSelection.range(start, start + selected.length),
+    };
+  });
+  view.dispatch(changes, { userEvent: FORMAT_EVENT });
+  view.focus();
+}
+
+// Link / image. A selection becomes the label (or alt text) and the caret
+// selects the placeholder URL so it can be typed over immediately.
+function insertLink(view, isImage) {
+  const lead = isImage ? '![' : '[';
+  const changes = view.state.changeByRange((range) => {
+    const selected = view.state.sliceDoc(range.from, range.to);
+    const label = selected || 'text';
+    const insert = `${lead}${label}](url)`;
+    const urlStart = range.from + lead.length + label.length + 2;
+    return {
+      changes: { from: range.from, to: range.to, insert },
+      range: EditorSelection.range(urlStart, urlStart + 3),
+    };
+  });
+  view.dispatch(changes, { userEvent: FORMAT_EVENT });
+  view.focus();
+}
+
+// The toolbar/keymap action table. Names match the data-md-action attributes in
+// index.html and the keys in app.js formatAction.
+const MD_ACTIONS = {
+  bold: (view) => wrapSelection(view, '**', '**'),
+  italic: (view) => wrapSelection(view, '*', '*'),
+  strike: (view) => wrapSelection(view, '~~', '~~'),
+  code: (view) => wrapSelection(view, '`', '`'),
+  h1: (view) => setHeading(view, 1),
+  h2: (view) => setHeading(view, 2),
+  h3: (view) => setHeading(view, 3),
+  ul: (view) => setListType(view, 'ul'),
+  ol: (view) => setListType(view, 'ol'),
+  quote: (view) => toggleLinePrefix(view, '> '),
+  codeblock: (view) => insertBlock(view, '```\n', '\n```'),
+  link: (view) => insertLink(view, false),
+  image: (view) => insertLink(view, true),
+  hr: (view) => insertBlock(view, '\n---\n', ''),
+};
+
+// Mod-b / Mod-i mirror the two most-used toolbar buttons. Placed before the
+// default keymap so they win the binding.
+const formatKeymap = keymap.of([
+  { key: 'Mod-b', run: (view) => (MD_ACTIONS.bold(view), true) },
+  { key: 'Mod-i', run: (view) => (MD_ACTIONS.italic(view), true) },
+]);
+
+// Built after formatKeymap (referenced above) and after the action table, so
+// the module has no forward references at initialization time.
 const extensions = [
   lineNumbers(),
   highlightActiveLine(),
@@ -75,16 +246,12 @@ const extensions = [
   highlightSelectionMatches(),
   syntaxHighlighting(highlightStyle),
   markdown(),
-  placeholder('Write Markdown…'),
+  placeholder('Write Markdown...'),
   EditorView.lineWrapping,
   keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+  formatKeymap,
   notedTheme,
 ];
-
-function isUserEdit(update) {
-  if (!update.docChanged) return false;
-  return update.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('undo') || t.isUserEvent('redo'));
-}
 
 export function createMarkdownEditor(parent, { getDoc, onDocChange }) {
   const updateListener = EditorView.updateListener.of((update) => {
@@ -101,6 +268,11 @@ export function createMarkdownEditor(parent, { getDoc, onDocChange }) {
 
   return {
     view,
+    /** Run a named Markdown formatting action (see MD_ACTIONS). No-op if unknown. */
+    runAction(name) {
+      const action = MD_ACTIONS[name];
+      if (action) action(view);
+    },
     /** Replace the document wholesale (used when switching notes). Resets undo history. */
     setDoc(doc) {
       if (view.state.doc.toString() === doc) return;

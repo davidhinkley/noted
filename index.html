@@ -333,6 +333,26 @@
             </template>
           </select>
 
+          <div class="md-toolbar" x-show="!preview" @mousedown.prevent>
+            <button type="button" class="md-btn" @click="formatAction('bold')" title="Bold (Ctrl+B)"><strong>B</strong></button>
+            <button type="button" class="md-btn" @click="formatAction('italic')" title="Italic (Ctrl+I)"><em>I</em></button>
+            <button type="button" class="md-btn" @click="formatAction('strike')" title="Strikethrough"><s>S</s></button>
+            <span class="md-sep"></span>
+            <button type="button" class="md-btn" @click="formatAction('h1')" title="Heading 1">H1</button>
+            <button type="button" class="md-btn" @click="formatAction('h2')" title="Heading 2">H2</button>
+            <button type="button" class="md-btn" @click="formatAction('h3')" title="Heading 3">H3</button>
+            <span class="md-sep"></span>
+            <button type="button" class="md-btn" @click="formatAction('ul')" title="Bullet list">&bull; List</button>
+            <button type="button" class="md-btn" @click="formatAction('ol')" title="Numbered list">1. List</button>
+            <button type="button" class="md-btn" @click="formatAction('quote')" title="Blockquote">&gt; Quote</button>
+            <span class="md-sep"></span>
+            <button type="button" class="md-btn" @click="formatAction('code')" title="Inline code">&#96;Code&#96;</button>
+            <button type="button" class="md-btn" @click="formatAction('codeblock')" title="Code block">{ }</button>
+            <button type="button" class="md-btn" @click="formatAction('link')" title="Link">Link</button>
+            <button type="button" class="md-btn" @click="formatAction('image')" title="Image">Image</button>
+            <button type="button" class="md-btn" @click="formatAction('hr')" title="Horizontal rule">&mdash;</button>
+          </div>
+
           <div class="editor-body">
             <div class="cm-host" x-show="!preview" x-init="mountEditor($el)"></div>
             <article class="preview markdown-body" x-show="preview" x-html="rendered"></article>

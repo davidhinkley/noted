@@ -57,6 +57,7 @@ Naming these gaps is deliberate. The default failure mode of a coding agent is t
 ### UI
 
 - The editor is **swappable**. Today it is a CodeMirror 6 view behind `js/ui/editor.js` — the **only** file allowed to import CodeMirror. Never couple storage, rendering, or export to a specific editor component.
+- The Markdown **formatting toolbar** lives in `index.html` and delegates to `formatAction(name)` in `js/ui/app.js`, which forwards to `editor.runAction(name)`. All buffer mutation stays inside `js/ui/editor.js`; toolbar actions dispatch annotated `userEvent` edits so the normal debounced save and undo history apply. Toolbar is hidden in preview.
 
 ### Process
 

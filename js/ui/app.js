@@ -120,6 +120,14 @@ document.addEventListener('alpine:init', () => {
       });
     },
 
+    // Markdown formatting toolbar (D4/D8). The app never touches CodeMirror
+    // directly; the wrapper owns the buffer mutation and we just name an action.
+    // The resulting edit flows back through onDocChange, so save/undo are normal.
+    formatAction(name) {
+      if (!this.editor) return;
+      this.editor.runAction(name);
+    },
+
     // Keyboard shortcuts (T22): Ctrl/Cmd+N new, +S save, +E preview, +K search.
     onKeydown(e) {
       if (!(e.metaKey || e.ctrlKey)) return;
