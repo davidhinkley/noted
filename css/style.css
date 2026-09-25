@@ -597,6 +597,71 @@ a.tag-chip:hover {
 
 /* ---- markdown preview ---- */
 
+.btn.danger:hover {
+  border-color: var(--danger);
+}
+
+/* ---- view mode switch (T28) ---- */
+
+.mode-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mode-switch .btn {
+  border: none;
+  border-radius: 0;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+}
+
+.mode-switch .btn.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.mode-switch .btn:not(.active):hover {
+  background: var(--surface-elevated);
+}
+
+/* Split view: editor and live preview side by side, each scrollable */
+.editor-body.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.editor-body.split .cm-host .cm-editor {
+  height: 56vh;
+}
+
+.editor-body.split .preview {
+  min-height: 56vh;
+  max-height: 56vh;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+/* Responsive: stack on narrow screens */
+@media (max-width: 760px) {
+  .editor-body.split {
+    grid-template-columns: 1fr;
+  }
+  .editor-body.split .preview {
+    min-height: 40vh;
+    max-height: 40vh;
+    padding-left: 0;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    padding-top: 12px;
+  }
+}
+
 .preview {
   min-height: 40vh;
 }

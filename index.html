@@ -252,8 +252,9 @@
 
             <label class="settings-row">
               <span>Open a note in</span>
-              <select x-model="settings.defaultPreview" @change="applySettings()">
+              <select x-model="settings.defaultView" @change="applySettings()">
                 <option value="edit">Edit mode</option>
+                <option value="split">Split (edit + preview)</option>
                 <option value="preview">Preview mode</option>
               </select>
             </label>
@@ -301,7 +302,11 @@
             <button type="button" class="btn" @click="goBack()">← Notes</button>
             <span class="save-state" x-text="saveLabel"></span>
             <span class="editor-bar-spacer"></span>
-            <button type="button" class="btn" title="Toggle preview (Ctrl+E)" @click="togglePreview()" x-text="preview ? 'Edit' : 'Preview'"></button>
+            <div class="mode-switch" role="group" aria-label="View mode">
+              <button type="button" class="btn" :class="{ active: mode === 'edit' }" @click="setMode('edit')" title="Editor only">Edit</button>
+              <button type="button" class="btn" :class="{ active: mode === 'split' }" @click="setMode('split')" title="Editor and live preview side by side (Ctrl+E)">Split</button>
+              <button type="button" class="btn" :class="{ active: mode === 'preview' }" @click="setMode('preview')" title="Rendered preview only">Preview</button>
+            </div>
             <button type="button" class="btn" @click="exportMD()">.md</button>
             <button type="button" class="btn danger" @click="removeNote()">Delete</button>
           </div>
@@ -333,7 +338,7 @@
             </template>
           </select>
 
-          <div class="md-toolbar" x-show="!preview" @mousedown.prevent>
+          <div class="md-toolbar" x-show="mode !== 'preview'" @mousedown.prevent>
             <button type="button" class="md-btn" @click="formatAction('bold')" title="Bold (Ctrl+B)"><strong>B</strong></button>
             <button type="button" class="md-btn" @click="formatAction('italic')" title="Italic (Ctrl+I)"><em>I</em></button>
             <button type="button" class="md-btn" @click="formatAction('strike')" title="Strikethrough"><s>S</s></button>
@@ -353,9 +358,15 @@
             <button type="button" class="md-btn" @click="formatAction('hr')" title="Horizontal rule">&mdash;</button>
           </div>
 
-          <div class="editor-body">
-            <div class="cm-host" x-show="!preview" x-init="mountEditor($el)"></div>
-            <article class="preview markdown-body" x-show="preview" x-html="rendered"></article>
+          <div class="editor-body" :class="mode">
+            <div class="cm-host" x-show="mode !== 'preview'" x-init="mountEditor($el)"></div>
+            <article
+              class="preview markdown-body"
+              x-ref="preview"
+              x-show="mode !== 'edit'"
+              @scroll="_syncFrom($refs.preview, _editorScroll)"
+              x-html="rendered"
+            ></article>
           </div>
 
           <div class="attachments">

@@ -23,7 +23,7 @@ import {
 } from '../crypto.js';
 import { importJSON } from '../io/import.js';
 import { createMarkdownEditor } from './editor.js';
-import { loadSettings, saveSettings, applySettings, DEFAULT_SETTINGS, FONT_SIZES } from './settings.js';
+import { loadSettings, saveSettings, applySettings, DEFAULT_SETTINGS, FONT_SIZES, VIEW_MODES } from './settings.js';
 
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -60,7 +60,7 @@ document.addEventListener('alpine:init', () => {
     notes: [],
     query: '',
     note: null, // editor draft: { id, title, body, tagsInput, createdAt, updatedAt }
-    preview: false,
+    mode: 'edit', // 'edit' | 'split' | 'preview' — see ui/settings.js VIEW_MODES (T28)
     saveState: 'saved', // 'saved' | 'dirty' | 'saving'
     _saveTimer: null,
     editor: null, // CodeMirror wrapper (ui/editor.js); null outside the note route
@@ -95,6 +95,7 @@ document.addEventListener('alpine:init', () => {
         if (route.name !== 'note' && this.editor) {
           this.editor.destroy();
           this.editor = null;
+          this._editorScroll = null;
         }
         if (route.name === 'note') this.query = '';
         this.route = route;
@@ -118,6 +119,11 @@ document.addEventListener('alpine:init', () => {
           this.touch();
         },
       });
+      // Kept for scroll sync only (T28); the editor still owns its own DOM.
+      this._editorScroll = this.editor.view.scrollDOM;
+      this._editorScroll.addEventListener('scroll', () => {
+        this._syncFrom(this._editorScroll, this.$refs.preview);
+      });
     },
 
     // Markdown formatting toolbar (D4/D8). The app never touches CodeMirror
@@ -128,7 +134,7 @@ document.addEventListener('alpine:init', () => {
       this.editor.runAction(name);
     },
 
-    // Keyboard shortcuts (T22): Ctrl/Cmd+N new, +S save, +E preview, +K search.
+    // Keyboard shortcuts (T22): Ctrl/Cmd+N new, +S save, +E view mode, +K search.
     onKeydown(e) {
       if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
@@ -204,8 +210,8 @@ document.addEventListener('alpine:init', () => {
       s.editorFontSize = FONT_SIZES.includes(Number(s.editorFontSize))
         ? String(Number(s.editorFontSize))
         : DEFAULT_SETTINGS.editorFontSize;
-      if (s.defaultPreview !== 'edit' && s.defaultPreview !== 'preview') {
-        s.defaultPreview = DEFAULT_SETTINGS.defaultPreview;
+      if (!VIEW_MODES.includes(s.defaultView)) {
+        s.defaultView = DEFAULT_SETTINGS.defaultView;
       }
       this.settings = { ...s };
       applySettings(this.settings);
@@ -247,7 +253,7 @@ document.addEventListener('alpine:init', () => {
       }
       this.note = null;
       this.attachments = [];
-      this.preview = false;
+      this.mode = 'edit';
       if (this.route.name === 'settings') {
         await this.loadStorageInfo();
         return;
@@ -325,7 +331,7 @@ document.addEventListener('alpine:init', () => {
         createdAt: n.createdAt,
         updatedAt: n.updatedAt,
       };
-      this.preview = this.settings.defaultPreview === 'preview';
+      this.mode = this.settings.defaultView;
       this.saveState = 'saved';
       // The draft holds plaintext in memory; the envelope stays in the DB.
       if (isEnvelope(this.note.body) && this.vault.unlocked && this._vaultKey) {
@@ -389,8 +395,45 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
+    // Three view modes (T28). 'split' is the word-processor layout: editor on
+    // the left, live-rendered preview on the right, updating as you type.
+    setMode(mode) {
+      if (!VIEW_MODES.includes(mode)) return;
+      this.mode = mode;
+      // A hidden CodeMirror view has no layout, so coming back from 'preview'
+      // needs a re-measure before the scroll ratio below means anything.
+      this.$nextTick(() => {
+        if (this.editor) this.editor.view.requestMeasure();
+        this._syncScroll();
+      });
+    },
+
+    // Ctrl+E cycles edit → split → preview → edit.
     togglePreview() {
-      this.preview = !this.preview;
+      this.setMode(VIEW_MODES[(VIEW_MODES.indexOf(this.mode) + 1) % VIEW_MODES.length]);
+    },
+
+    // Proportional scroll sync between editor and preview (T28). Only in split
+    // mode — the other modes have a single pane, so there is nothing to pair.
+    // The lock stops a scroll echoed back from re-triggering its partner.
+    _syncLock: false,
+
+    _syncFrom(src, dst) {
+      if (this.mode !== 'split' || this._syncLock || !src || !dst) return;
+      const srcMax = src.scrollHeight - src.clientHeight;
+      const dstMax = dst.scrollHeight - dst.clientHeight;
+      if (srcMax <= 0 || dstMax <= 0) return;
+      this._syncLock = true;
+      dst.scrollTop = (src.scrollTop / srcMax) * dstMax;
+      requestAnimationFrame(() => {
+        this._syncLock = false;
+      });
+    },
+
+    _syncScroll() {
+      if (this.mode !== 'split') return;
+      const pv = this.$refs.preview;
+      if (pv && this._editorScroll) this._syncFrom(pv, this._editorScroll);
     },
 
     async goBack() {

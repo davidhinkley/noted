@@ -10,10 +10,13 @@
 
 export const STORAGE_KEY = 'noted.settings';
 
+// View modes for the note editor (T28). Order is the Ctrl+E cycle order.
+export const VIEW_MODES = ['edit', 'split', 'preview'];
+
 export const DEFAULT_SETTINGS = {
   theme: 'system',
   editorFontSize: '15',
-  defaultPreview: 'edit',
+  defaultView: 'edit',
 };
 
 export const FONT_SIZES = [13, 15, 17];
@@ -28,8 +31,12 @@ export function loadSettings() {
     if (FONT_SIZES.includes(Number(raw.editorFontSize))) {
       s.editorFontSize = String(Number(raw.editorFontSize));
     }
-    if (raw.defaultPreview === 'edit' || raw.defaultPreview === 'preview') {
-      s.defaultPreview = raw.defaultPreview;
+    // `defaultPreview` predates the split mode (T28) and held only
+    // 'edit'|'preview'. Read it as a fallback so an existing preference is
+    // carried over by the rename rather than silently reset.
+    const view = raw.defaultView ?? raw.defaultPreview;
+    if (VIEW_MODES.includes(view)) {
+      s.defaultView = view;
     }
     return s;
   } catch {

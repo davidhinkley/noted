@@ -58,6 +58,7 @@ Naming these gaps is deliberate. The default failure mode of a coding agent is t
 
 - The editor is **swappable**. Today it is a CodeMirror 6 view behind `js/ui/editor.js` — the **only** file allowed to import CodeMirror. Never couple storage, rendering, or export to a specific editor component.
 - The Markdown **formatting toolbar** lives in `index.html` and delegates to `formatAction(name)` in `js/ui/app.js`, which forwards to `editor.runAction(name)`. All buffer mutation stays inside `js/ui/editor.js`; toolbar actions dispatch annotated `userEvent` edits so the normal debounced save and undo history apply. Toolbar is hidden in preview.
+- The **view mode** (Edit / Split / Preview) is controlled by `mode: 'edit' | 'split' | 'preview'` in `js/ui/app.js`, cycled via `togglePreview()` (Ctrl+E). In Split mode the editor and live preview render side-by-side in a CSS grid; the preview pane is a scrollable region with proportional scroll sync so both panes track each other. The setting is persisted as `defaultView` (renamed from `defaultPreview` for T28) in localStorage.
 
 ### Process
 
