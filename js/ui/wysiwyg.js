@@ -94,10 +94,19 @@ function tidy(md) {
     // `**bold**` stores `\*\*bold\*\*` and the next render shows plain
     // asterisks instead of bold — the one gesture this mode exists for.
     // Undo the escaping so typed syntax round-trips as syntax, the way Typora
-    // and Obsidian behave. The cost is that a genuinely literal asterisk can
-    // no longer be written; a notes app whose whole point is Markdown gets
-    // that trade.
-    .replace(/\\([^\w\s])/g, '$1')
+    // and Obsidian behave. The cost is that a genuinely literal metacharacter
+    // can no longer be written; a notes app whose whole point is Markdown
+    // gets that trade.
+    //
+    // The class must be "punctuation", spelled out, rather than `[^\w\s]`:
+    // \w includes the underscore, so that class silently skipped `\_` and
+    // left typed `_italic_` as visible `\ _italic\ _`. `\w` is the wrong
+    // notion of "safe to un-escape" — what matters is "is this a character
+    // Markdown can backslash-escape", which is ASCII punctuation. Letters,
+    // digits and whitespace are excluded so an intentional literal backslash
+    // (`C:\new`) survives the round-trip as a backslash rather than turning
+    // into a newline.
+    .replace(/\\([!-\/:-@\[-`{-~])/g, '$1')
     // Drop the caret anchor (see placeCaretAtEnd) so it never reaches storage.
     .replace(/\u200b/g, '')
     .trim();
