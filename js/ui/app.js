@@ -21,11 +21,11 @@ import {
   encryptBlob,
   decryptBlob,
 } from '../crypto.js';
-import { importJSON } from '../io/import.js';
+import { importJSON, importMarkdownFile } from '../io/import.js';
 import { createMarkdownEditor } from './editor.js';
-import { createWysiwygEditor } from './wysiwyg.js';
+import { createWysiwygEditor, setMediaResolver } from './wysiwyg.js';
+import { createMediaResolver, refsIn, toRef } from '../media.js';
 import { loadSettings, saveSettings, applySettings, DEFAULT_SETTINGS, FONT_SIZES, VIEW_MODES } from './settings.js';
-
 const SAVE_DEBOUNCE_MS = 400;
 
 function deriveTitle(body) {
@@ -65,7 +65,10 @@ document.addEventListener('alpine:init', () => {
     saveState: 'saved', // 'saved' | 'dirty' | 'saving'
     _saveTimer: null,
     editor: null, // CodeMirror wrapper (ui/editor.js); null outside the note route
-    wysiwyg: null, // Write-mode wrapper (ui/wysiwyg.js); null outside the note route
+    wysiwyg: null, // Edit-mode wrapper (ui/wysiwyg.js); null outside the note route
+    media: null, // attachment resolver for the current note (D14); one per note
+    _mediaKey: '', // guards redundant re-resolves while typing
+    _reconcileTimer: null, // debounces the post-paste re-resolve
     settings: null, // loaded in init(); see ui/settings.js (T23)
     folders: [], // folder records (T24); loaded on demand for the folders view + editor select
     folderCounts: {}, // { [folderId]: noteCount } for the folders view
@@ -104,6 +107,13 @@ document.addEventListener('alpine:init', () => {
           this.wysiwyg.destroy();
           this.wysiwyg = null;
         }
+        if (route.name !== 'note' && this.media) {
+          // Object URLs are session-scoped; leaving them alive leaks a blob per
+          // attachment per note visit (D14).
+          this.media.release();
+          this.media = null;
+          this._mediaKey = '';
+        }
         if (route.name === 'note') this.query = '';
         this.route = route;
         await this.loadRoute();
@@ -133,6 +143,87 @@ document.addEventListener('alpine:init', () => {
     // of the app sees the same `body` string the source editor produces. It is
     // mounted alongside the source editor and stays hidden in the other modes,
     // which is why its buffer is handed over explicitly on the way out (setMode).
+    /**
+     * Store a pasted/dropped image and return the `attachment:<id>`
+     * reference to insert at the caret. Vault-encrypted when the vault
+     * is enabled (D14).
+     */
+    async onAttachImage(file) {
+      if (!this.note) throw new Error('no note');
+      const data = file; // File is a Blob; addAttachment accepts Blob
+      const enc = !!(this.vault.enabled && this.vault.unlocked && this._vaultKey);
+      const att = await db.addAttachment(this.note.id, {
+        name: file.name || 'image',
+        type: file.type || 'image/png',
+        data,
+        enc,
+      });
+      this.attachments = await db.listAttachments(this.note.id);
+      return toRef(att.id);
+    },
+
+    /**
+     * Identity of the resolution work: the note plus the set of attachment
+     * references it contains. Keying on the REFERENCE SET, not the body text,
+     * is what keeps resolution off the typing path. A body-keyed guard is
+     * invalidated by every keystroke, so every settle would re-resolve and
+     * repaint the whole surface mid-sentence and throw the caret.
+     */
+    mediaKey() {
+      return this.note.id + '|' + refsIn(this.note.body || '').join(',');
+    },
+
+    /**
+     * Build the per-note resolution table (D14). Missing, deleted, or
+     * still-encrypted attachments are skipped rather than throwing, so one
+     * bad reference cannot blank a note. The `_mediaKey` guard prevents
+     * re-resolving when nothing about the references has changed.
+     */
+    async resolveMedia() {
+      if (!this.note) return;
+      if (!this.media) this.media = createMediaResolver();
+      // Install synchronously and unconditionally. The surface may already be
+      // mounted and painting; leaving the module-level resolver null or stale
+      // here is what made the first paint drop the attachment `src`.
+      setMediaResolver(this.media);
+      // Note id is part of the key: two notes with byte-identical bodies would
+      // otherwise hit the early return and inherit the previous note's object
+      // URLs, showing an image the note does not actually reference.
+      const key = this.mediaKey();
+      if (key === this._mediaKey) return;
+      this._mediaKey = key;
+      await this.media.resolve(this.note.id, this.note.body, {
+        vaultKey: this._vaultKey,
+        vaultUnlocked: this.vault.unlocked,
+      });
+      // Warn once if any reference could not be resolved.
+      const missing = this.media.missing(this.note.id, this.note.body);
+      if (missing.length) {
+        console.warn('[noted] unresolved attachment refs:', missing);
+      }
+    },
+
+    /**
+     * A pasted image is stored first and its reference lands in the body a
+     * moment later, so the reference arrives AFTER the resolver has already
+     * run. Without this, a freshly pasted image stays an unresolvable
+     * reference until the note is reopened. The guard is the reference set
+     * (see `mediaKey`), so ordinary keystrokes do not alter it and no repaint
+     * is scheduled -- only a genuinely new or removed reference is.
+     */
+    reconcileMedia() {
+      if (!this.note) return;
+      if (this.mediaKey() === this._mediaKey) return;
+      if (this._reconcileTimer) clearTimeout(this._reconcileTimer);
+      this._reconcileTimer = setTimeout(async () => {
+        this._reconcileTimer = null;
+        await this.resolveMedia();
+        // Only repaint if the surface is the one on screen; otherwise the
+        // editor does this itself the next time the mode is entered.
+        if (this.wysiwyg && this.mode === 'edit') this.wysiwyg.refresh();
+      }, 120);
+    },
+
     mountWysiwyg(el) {
       if (this.wysiwyg) return;
       this.wysiwyg = createWysiwygEditor(el, {
@@ -141,8 +232,17 @@ document.addEventListener('alpine:init', () => {
           if (!this.note) return;
           this.note.body = body;
           this.touch();
+          this.reconcileMedia();
         },
+        onAttachImage: (file) => this.onAttachImage(file),
       });
+      setMediaResolver(this.media);
+      // Mount order is not guaranteed. The note pane is behind an x-if, so
+      // openNote can finish (and pass its `if (this.wysiwyg) setBody` guard)
+      // before Alpine's x-init calls this. If that happened, paint the loaded
+      // note now; if openNote is still mid-flight it will setBody itself.
+      // Without this the surface can mount blank or stale in Edit mode.
+      if (this.note) this.wysiwyg.setBody(this.note.body || '');
     },
 
     // Markdown formatting toolbar (D4/D8). The app never touches an editor
@@ -359,13 +459,18 @@ document.addEventListener('alpine:init', () => {
           /* keep the envelope */
         }
       }
+      this.attachments = await db.listAttachments(id);
+      // Resolve the attachment refs BEFORE either surface is given the body.
+      // The Edit-mode surface renders Markdown on setBody, so a resolver that
+      // arrives afterwards is too late: the image is already painted without a
+      // src and nothing re-renders it. Order is load-bearing (D14).
+      await this.resolveMedia();
       // If the editor is already mounted (note→note navigation, e.g. Ctrl+N),
       // swap its document in place. A fresh mount reads getDoc() instead.
       if (this.editor) this.editor.setDoc(this.note.body || '');
-      // The Write-mode surface is mounted once and survives note→note
+      // The Edit-mode surface is mounted once and survives note→note
       // navigation, so it needs the same explicit body swap.
       if (this.wysiwyg) this.wysiwyg.setBody(this.note.body || '');
-      this.attachments = await db.listAttachments(id);
     },
 
     open(id) {
@@ -597,7 +702,7 @@ document.addEventListener('alpine:init', () => {
 
     async exportZip() {
       try {
-        await exportMarkdownZip(await db.listActiveNotes());
+        await exportMarkdownZip(await db.listActiveNotes(), (id) => this.attachmentsFor(id));
       } catch (err) {
         window.alert(`Zip export failed: ${err.message}`);
       }
@@ -696,14 +801,60 @@ document.addEventListener('alpine:init', () => {
       await exportJSON(await db.listAllNotes(), await db.listAllAttachments());
     },
 
+    /**
+     * Attachments for export, decrypted on demand. Export is the one place
+     * where the bytes must leave the app, so an encrypted attachment is
+     * decrypted here and inlined as a plaintext data: URI in the download.
+     * A reference whose attachment is still encrypted (vault locked) is left
+     * in place rather than silently dropped -- the user can see what is broken.
+     */
+    async attachmentsFor(noteId) {
+      const atts = await db.listAttachments(noteId);
+      if (!this.vault.enabled || !(this.vault.unlocked && this._vaultKey)) return atts;
+      const out = [];
+      for (const a of atts) {
+        if (a.enc) {
+          try { out.push({ ...a, data: await decryptBlob(this._vaultKey, a.data, a.type), enc: false }); }
+          catch { out.push(a); }
+        } else {
+          out.push(a);
+        }
+      }
+      return out;
+    },
+
     exportMD() {
       if (!this.note) return;
-      exportMarkdown({ title: this.note.title.trim() || deriveTitle(this.note.body), body: this.note.body });
+      // D14: an exported .md is read outside NOTED, where `attachment:<id>`
+      // resolves to nothing, so referenced images are inlined as data: URIs
+      // here. The note.body itself is untouched.
+      exportMarkdown(
+        { title: this.note.title.trim() || deriveTitle(this.note.body), body: this.note.body },
+        (id) => this.attachmentsFor(id),
+      );
     },
 
     // Import mode split (T32, D13): the topbar Import merges (lossless sync
     // default); true backup restore lives in Settings as a destructive action.
     _importMode: 'merge',
+
+    /**
+     * Open a .md/.txt file as a new note (T26). Distinct from the JSON backup
+     * import: this is "open a document to edit", not "sync a library", so it
+     * creates one note with a fresh id and jumps straight into it.
+     */
+    async onOpenFile(event) {
+      const file = event.target.files[0];
+      event.target.value = '';
+      if (!file) return;
+      try {
+        const note = await importMarkdownFile(await file.text(), file.name);
+        await this.refreshList();
+        this.open(note.id);
+      } catch (err) {
+        window.alert(`Could not open the file: ${err.message}`);
+      }
+    },
 
     triggerImport(mode = 'merge') {
       this._importMode = mode;

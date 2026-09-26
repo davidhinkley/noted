@@ -30,12 +30,24 @@
  *    stack and handles Mod-z / Mod-Shift-z itself.
  */
 
+import { sanitizeForNotes } from '../media.js';
+
 const SETTLE_MS = 250;
 const UNDO_LIMIT = 200;
 
 // Turndown is cheap to configure but not free to construct, and the GFM bundle
 // must be present before it is useful; build one per page and reuse it.
 let serializer = null;
+
+// Set by setMediaResolver() so the serializer can map a rendered blob: URL back
+// to its `attachment:<id>` reference. Module-level because the Turndown rule is
+// registered once and shared.
+let mediaResolver = null;
+
+/** Point the serializer at the current note's resolution table (D14). */
+export function setMediaResolver(resolver) {
+  mediaResolver = resolver;
+}
 
 function getSerializer() {
   if (serializer) return serializer;
@@ -72,13 +84,43 @@ function getSerializer() {
       return '\n\n```' + (lang ? lang[1] : '') + '\n' + body + '\n```\n\n';
     },
   });
+  // Reverse the render-time resolution (D14). An <img> in the surface carries a
+  // session blob: URL; serializing that verbatim would write an ephemeral URL
+  // into note.body and corrupt the document on the first repaint. This rule is
+  // the only thing standing between a live image and a broken note.
+  service.addRule('attachmentImage', {
+    filter(node) {
+      if (node.nodeName !== 'IMG') return false;
+      const src = node.getAttribute('src') || '';
+      return typeof mediaResolver === 'object' && Boolean(mediaResolver.refForSrc(src));
+    },
+    replacement(content, node) {
+      const src = node.getAttribute('src') || '';
+      const ref = mediaResolver.refForSrc(src) || src;
+      const alt = (node.getAttribute('alt') || '').replace(/[\[\]]/g, '');
+      return `![${alt}](${ref})`;
+    },
+  });
   serializer = service;
   return service;
 }
 
 function renderMarkdown(body) {
   const html = marked.parse(body || '', { async: false, gfm: true, breaks: true });
-  return DOMPurify.sanitize(html);
+  // Sanitize with the widened URI regexp, then swap `attachment:<id>` for a
+  // session blob: URL. Order matters: resolving first would hand DOMPurify an
+  // unpinned string, and sanitizing first with the default allowlist would
+  // strip the reference before there was anything to resolve (D14).
+  //
+  // The sanitizeForNotes fallback is deliberate. With no resolver installed
+  // yet, the default sanitizer silently drops the `src` attribute, which
+  // destroys the reference on the very next serialize: the user sees a broken
+  // image AND the note silently loses its link to the attachment. Preserving
+  // the unresolvable reference is the only safe degradation — it renders as a
+  // broken image, but note.body survives intact and repaints correctly once
+  // the resolver arrives.
+  const safe = sanitizeForNotes(html);
+  return mediaResolver ? mediaResolver.resolveHtml(safe) : safe;
 }
 
 // Turndown is faithful about structure and sloppy about the whitespace GFM
@@ -122,6 +164,11 @@ function escapeHtml(s) {
 
 function escapeAttr(s) {
   return escapeHtml(s).replace(/"/g, '&quot;');
+}
+
+/** Alt text sits inside ![...] so brackets would close the label early. */
+function escapeMarkdownAlt(s) {
+  return String(s).replace(/([\[\]])/g, '\\$1').replace(/\n/g, ' ');
 }
 
 // ---- caret preservation -----------------------------------------------------
@@ -349,7 +396,7 @@ function placeCaretAtEnd(host) {
   return true;
 }
 
-export function createWysiwygEditor(parent, { getBody, onBodyChange }) {
+export function createWysiwygEditor(parent, { getBody, onBodyChange, onAttachImage }) {
   // Use the mount element itself as the editing surface, the way editor.js
   // does. Wrapping it in a second div would make querySelector('.wysiwyg-host')
   // resolve to the wrapper, not the contenteditable, and every keystroke would
@@ -593,12 +640,41 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange }) {
     settle();
   });
 
+  // A pasted or dropped image becomes an attachment plus an `attachment:<id>`
+  // reference at the caret (D14). This is the whole point of the scheme: the
+  // Markdown names the file, and the resolver makes it display.
+  function insertImageFiles(files) {
+    const images = [...files].filter((f) => f && /^image\//i.test(f.type || ''));
+    if (!images.length || typeof onAttachImage !== 'function') return false;
+    // The caret must survive the await, so remember it now.
+    const position = readCaret(host);
+    Promise.all(images.map((file) => onAttachImage(file)))
+      .then((refs) => {
+        const md = refs.map((ref, i) => `![${escapeMarkdownAlt(images[i].name || 'image')}](${ref})`).join('\n\n');
+        // Re-place the caret (the await let the debounce repaint) and insert.
+        if (position) writeCaret(host, position);
+        document.execCommand('insertText', false, md);
+        lastCaret = readCaret(host);
+        schedule();
+      })
+      .catch((err) => {
+        console.error('[noted] image insert failed', err);
+        window.alert('Could not attach that image.');
+      });
+    return true;
+  }
+
   // Pasting foreign HTML would import its styles and classes, so paste the
   // Markdown instead: rich text becomes Markdown, and the next settle renders
-  // it back through marked.
+  // it back through marked. An image on the clipboard is the exception — it
+  // becomes an attachment rather than a link to wherever it came from.
   host.addEventListener('paste', (e) => {
-    e.preventDefault();
     const clipboard = e.clipboardData;
+    if (clipboard && clipboard.files && clipboard.files.length) {
+      if (insertImageFiles(clipboard.files)) e.preventDefault();
+      return;
+    }
+    e.preventDefault();
     const html = clipboard && clipboard.getData('text/html');
     const text = clipboard && clipboard.getData('text/plain');
     if (html) {
@@ -608,6 +684,19 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange }) {
     }
     lastCaret = readCaret(host);
     schedule();
+  });
+
+  // Dragging an image in from the desktop or a file manager is the same gesture
+  // as pasting one, and far more common for screenshots.
+  host.addEventListener('drop', (e) => {
+    const dt = e.dataTransfer;
+    if (!dt || !dt.files || !dt.files.length) return;
+    e.preventDefault();
+    insertImageFiles(dt.files);
+  });
+  // Without this the browser navigates to the dropped file and the note is lost.
+  host.addEventListener('dragover', (e) => {
+    if (e.dataTransfer && [...e.dataTransfer.types].includes('Files')) e.preventDefault();
   });
 
   host.addEventListener('keydown', (e) => {
@@ -632,10 +721,14 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange }) {
     }
   });
 
-  apply(getBody() || '');
+  // No paint at construction time. The surface is mounted by Alpine x-init
+  // before openNote runs, so getBody() is '' and no resolver is installed yet;
+  // painting here is the first paint that can never see the attachment refs.
+  // openNote calls setBody() once the resolver is in place.
 
   return {
     element: host,
+
 
     /** Run a named formatting action, matching ui/editor.js. No-op if unknown. */
     runAction(name) {
@@ -650,6 +743,18 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange }) {
     /** Replace the body wholesale (used when switching notes). Resets undo. */
     setBody(body) {
       apply(body || '');
+    },
+
+    /**
+     * Re-render the current body without touching the undo stacks. Used when
+     * something *outside* the buffer changed the rendered result — currently
+     * only a newly-attached image becoming resolvable (D14). Going through
+     * setBody/apply here would clear the user's undo history on every paste,
+     * which is a far worse bug than a momentarily stale image.
+     */
+    refresh() {
+      if (repainting) return;
+      paint(getBody() || '', lastCaret);
     },
 
     /** Commit any pending edit right now (used when leaving Write mode). */

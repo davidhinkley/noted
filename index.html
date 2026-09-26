@@ -77,6 +77,7 @@
         <template x-if="vault.enabled">
           <button type="button" class="btn" @click="vault.unlocked ? lockVault() : unlockVault()" :title="vault.unlocked ? 'Lock vault' : 'Unlock vault'" x-text="vault.unlocked ? '🔓' : '🔒'"></button>
         </template>
+        <button type="button" class="btn" @click="$refs.openFile.click()" title="Open a Markdown or text file as a new note">Open</button>
         <button type="button" class="btn" @click="triggerImport()" title="Import a backup file (merge: adds new, applies newer, never discards edits)">Import</button>
         <button type="button" class="btn" @click="exportAll()">Export</button>
         <button type="button" class="btn" @click="exportZip()" title="Export all notes as Markdown zip">Export .zip</button>
@@ -310,7 +311,7 @@
               <button type="button" class="btn" :class="{ active: mode === 'edit' }" @click="setMode('edit')" title="Write in the rendered document (Ctrl+E)">Edit</button>
               <button type="button" class="btn" :class="{ active: mode === 'code' }" @click="setMode('code')" title="Edit the raw Markdown source (Ctrl+E)">Code</button>
             </div>
-            <button type="button" class="btn" @click="exportMD()">.md</button>
+            <button type="button" class="btn" @click="exportMD()" title="Save a copy of this note as a Markdown file">Save .md</button>
             <button type="button" class="btn danger" @click="removeNote()">Delete</button>
           </div>
 
@@ -375,13 +376,13 @@
 
           <div class="attachments">
             <div class="attachments-head">
-              <span x-text="'Attachments (' + attachments.length + ')'"></span>
-              <button type="button" class="btn tiny" @click="triggerAttach()" title="Attach files (max 25MB each)">+ Attach</button>
+              <span x-text="'Files (' + attachments.length + ')'"></span>
+              <button type="button" class="btn tiny" @click="triggerAttach()" title="Store files with this note (max 25MB each); kept alongside it, encrypted with the vault if it is on, purged when the note is deleted">+ Attach files</button>
             </div>
             <ul class="attachment-list" x-show="attachments.length">
               <template x-for="a in attachments" :key="a.id">
                 <li class="attachment-row">
-                  <button type="button" class="attachment-name" @click="downloadAttachment(a.id)" x-text="(a.enc ? '🔒 ' : '') + a.name"></button>
+                  <button type="button" class="attachment-name" @click="downloadAttachment(a.id)" x-text="(a.enc ? '🔒 ' : '') + a.name" title="Save this file back out"></button>
                   <span class="attachment-meta" x-text="formatBytes(a.size)"></span>
                   <button type="button" class="btn tiny danger" @click="removeAttachment(a.id)" title="Remove attachment">Remove</button>
                 </li>
@@ -404,6 +405,13 @@
       accept=".json,application/json"
       x-ref="importFile"
       @change="onImportFile($event)"
+      hidden
+    >
+    <input
+      type="file"
+      accept=".md,.markdown,.txt,text/markdown,text/plain"
+      x-ref="openFile"
+      @change="onOpenFile($event)"
       hidden
     >
     <input type="file" x-ref="attachFile" @change="onAttachFiles($event)" multiple hidden>

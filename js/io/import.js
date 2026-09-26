@@ -1,7 +1,7 @@
 /* io/import.js — JSON import with validation. Hands results to db.js. */
 
 import { SCHEMA_VERSION } from './export.js';
-import { bulkImport, bulkImportAttachments, mergeImport } from '../db.js';
+import { bulkImport, bulkImportAttachments, createNote, mergeImport } from '../db.js';
 
 /**
  * Validates an export file and upserts its notes (idempotent by id).
@@ -61,6 +61,28 @@ export async function importJSON(text, { mode = 'merge' } = {}) {
     merged = await mergeImport(notes, atts);
   }
   return { imported: notes.length, skipped, attachments: atts.length, merged };
+}
+
+/**
+ * Open a plain Markdown or text file as a new note (T26). The file's raw text
+ * becomes note.body verbatim -- it is already Markdown (or soon will be), so
+ * there is nothing to convert. The title is the filename minus its extension;
+ * a Markdown file usually also carries a # heading, and deriveTitle would just
+ * duplicate it, so the filename wins.
+ *
+ * One file = one note, always. This is the "open a document" path, not the
+ * backup path, so unlike importJSON there is no merge to reason about: the
+ * note gets a fresh UUID and is opened for editing immediately.
+ */
+export async function importMarkdownFile(text, name) {
+  const body = String(text || '');
+  const title = String(name || '').replace(/\.[^.]+$/, '').trim();
+  const note = await createNote({
+    title,
+    body,
+    tags: [],
+  });
+  return note;
 }
 
 function isNum(v) {

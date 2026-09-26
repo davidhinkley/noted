@@ -42,6 +42,8 @@ Naming these gaps is deliberate. The default failure mode of a coding agent is t
 - **Soft-delete only.** Set `deletedAt`. Never hard-delete except from the trash view (`TODO.md` **T21**).
 - Use Dexie. Do not add a second storage layer (localStorage for note data, OPFS) without adding an entry to `architecture.md` → **Decisions** first.
 - Every schema change **bumps the Dexie version** and ships a migration.
+- Attachments are referenced from the body as `attachment:<uuid>` (D14). `js/media.js` owns the scheme; resolution happens at render time only. Never write a `blob:` or `data:` URL into `note.body`.
+- **Exports inline attachments.** `.md` and `.zip` downloads rewrite `attachment:<id>` to a `data:` URI (`inlineAttachments()` in `js/io/export.js`), because an exported note is read outside NOTED where the scheme resolves to nothing. This is the one sanctioned exception to "keep the body clean", and it lives in the exporter — never in the body or the DB.
 
 ### Routing
 
@@ -70,6 +72,8 @@ Edit mode mounts a contenteditable that renders the note via `marked` + `DOMPuri
 - The round-trip is **lossy where Markdown is ambiguous** (trailing "  " hard breaks, setext headings, reference links). Formatting survives; exact bytes do not. This is a known, documented limitation, not a bug to chase.
 - Undo is the module's own snapshot stack: re-rendering wipes the browser's contenteditable history.
 - The surface is the mount element itself (as in `editor.js`), **not** a wrapper div — a nested div would make `querySelector('.wysiwyg-host')` resolve to the wrong node and swallow every keystroke.
+- The note pane is behind `x-if`, so Alpine's `x-init="mountWysiwyg"` fires **after** `openNote` has run, and `openNote`'s `if (this.wysiwyg) setBody(...)` guard is skipped. The surface therefore paints the loaded note in `mountWysiwyg` itself. Do not remove that on the assumption that `openNote` "always" runs second — it does not, and the surface mounts blank or stale.
+- Attachment resolution is cached on the **set of references** in the body (`mediaKey()`), never on the body text. A body-keyed guard is invalidated by every keystroke, so every debounced settle would repaint the surface and throw the caret (D14).
 
 ### Process
 
