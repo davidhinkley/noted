@@ -8,19 +8,21 @@
  *   so the app works from any subdirectory.
  */
 
-const CACHE_VERSION = 'noted-v19';
+const CACHE_VERSION = 'noted-v20';
 
 const SHELL_FILES = [
   'index.html',
   'css/style.css',
   'js/crypto.js',
   'js/db.js',
+  'js/media.js',
   'js/search.js',
   'js/router.js',
   'js/pwa.js',
   'js/ui/app.js',
   'js/ui/editor.js',
   'js/ui/settings.js',
+  'js/ui/wysiwyg.js',
   'js/io/export.js',
   'js/io/import.js',
   'manifest.json',
