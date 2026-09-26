@@ -237,12 +237,26 @@ document.addEventListener('alpine:init', () => {
         onAttachImage: (file) => this.onAttachImage(file),
       });
       setMediaResolver(this.media);
-      // Mount order is not guaranteed. The note pane is behind an x-if, so
-      // openNote can finish (and pass its `if (this.wysiwyg) setBody` guard)
-      // before Alpine's x-init calls this. If that happened, paint the loaded
-      // note now; if openNote is still mid-flight it will setBody itself.
-      // Without this the surface can mount blank or stale in Edit mode.
-      if (this.note) this.wysiwyg.setBody(this.note.body || '');
+      this.syncWysiwyg();
+    },
+
+    /**
+     * Point the Edit surface at the current note. Idempotent, and called by
+     * every event that can change what the surface should show: mount, note
+     * load, and mode switch.
+     *
+     * This is one function rather than a guard in each caller because the
+     * note pane is behind an x-if, so whether the surface mounts before or
+     * after `openNote` is a detail of Alpine's scheduler. The first version of
+     * this put an `if (this.wysiwyg) setBody(...)` guard in openNote and a
+     * mirror-image one here, which meant BOTH had to be right in the right
+     * order; the guards silently did nothing on one of the two orders and the
+     * surface mounted blank. Encoding the ordering in a comment is not the
+     * same as enforcing it — so nothing depends on the order now.
+     */
+    syncWysiwyg() {
+      if (!this.wysiwyg || !this.note) return;
+      this.wysiwyg.setBody(this.note.body || '');
     },
 
     // Markdown formatting toolbar (D4/D8). The app never touches an editor
@@ -470,7 +484,7 @@ document.addEventListener('alpine:init', () => {
       if (this.editor) this.editor.setDoc(this.note.body || '');
       // The Edit-mode surface is mounted once and survives note→note
       // navigation, so it needs the same explicit body swap.
-      if (this.wysiwyg) this.wysiwyg.setBody(this.note.body || '');
+      this.syncWysiwyg();
     },
 
     open(id) {
@@ -538,9 +552,7 @@ document.addEventListener('alpine:init', () => {
       // mounted once and stays alive across mode switches, so it is still
       // holding whatever it last painted — without this, edits made in Code
       // mode do not appear when you switch back.
-      if (mode === 'edit' && this.wysiwyg && this.note) {
-        this.wysiwyg.setBody(this.note.body || '');
-      }
+      if (mode === 'edit') this.syncWysiwyg();
       this.mode = mode;
       this.$nextTick(() => {
         // A hidden CodeMirror view has no layout, so it needs a re-measure

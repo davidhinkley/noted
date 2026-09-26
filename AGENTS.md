@@ -72,7 +72,7 @@ Edit mode mounts a contenteditable that renders the note via `marked` + `DOMPuri
 - The round-trip is **lossy where Markdown is ambiguous** (trailing "  " hard breaks, setext headings, reference links). Formatting survives; exact bytes do not. This is a known, documented limitation, not a bug to chase.
 - Undo is the module's own snapshot stack: re-rendering wipes the browser's contenteditable history.
 - The surface is the mount element itself (as in `editor.js`), **not** a wrapper div — a nested div would make `querySelector('.wysiwyg-host')` resolve to the wrong node and swallow every keystroke.
-- The note pane is behind `x-if`, so Alpine's `x-init="mountWysiwyg"` fires **after** `openNote` has run, and `openNote`'s `if (this.wysiwyg) setBody(...)` guard is skipped. The surface therefore paints the loaded note in `mountWysiwyg` itself. Do not remove that on the assumption that `openNote` "always" runs second — it does not, and the surface mounts blank or stale.
+- The note pane is behind `x-if`, so the surface mounts at a point Alpine chooses — it can land **during** `openNote`'s `await`, after it, or after a note arrives. Every event that changes what the surface should show therefore calls the one idempotent `syncWysiwyg()` (mount, `openNote`, `setMode`) instead of a local `if (this.wysiwyg) setBody(...)` guard. Per-caller guards only work in one order, and the wrong one silently mounts the surface blank; **add a new call site to `syncWysiwyg`, never a new guard.**
 - Attachment resolution is cached on the **set of references** in the body (`mediaKey()`), never on the body text. A body-keyed guard is invalidated by every keystroke, so every debounced settle would repaint the surface and throw the caret (D14).
 
 ### Process
