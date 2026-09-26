@@ -54,6 +54,25 @@ export function refsIn(body) {
 }
 
 /**
+ * Cache key for one note's resolution work: the note plus the set of
+ * attachment ids it references.
+ *
+ * This lives here, next to the scheme, because deriving it is the one thing
+ * that must never be done differently by two callers. Keying on the body
+ * TEXT instead of the reference set invalidates the key on every keystroke,
+ * which puts a full re-resolve and surface repaint on the typing path and
+ * throws the caret mid-sentence. That regression shipped once and was only
+ * findable by instrumenting the key, because the guard it broke was a
+ * comment saying the key was stable.
+ *
+ * `body` is an input, not part of the identity: it is read only to pull out
+ * the references. Prefer calling this over building the string inline.
+ */
+export function refSetKey(noteId, body) {
+  return String(noteId || '') + '|' + refsIn(body).join(',');
+}
+
+/**
  * A per-note resolution table. Holds the two maps plus the object URLs minted
  * for this note, so they can all be released together.
  */

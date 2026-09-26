@@ -24,7 +24,7 @@ import {
 import { importJSON, importMarkdownFile } from '../io/import.js';
 import { createMarkdownEditor } from './editor.js';
 import { createWysiwygEditor, setMediaResolver } from './wysiwyg.js';
-import { createMediaResolver, refsIn, toRef } from '../media.js';
+import { createMediaResolver, refSetKey, toRef } from '../media.js';
 import { loadSettings, saveSettings, applySettings, DEFAULT_SETTINGS, FONT_SIZES, VIEW_MODES } from './settings.js';
 const SAVE_DEBOUNCE_MS = 400;
 
@@ -163,14 +163,24 @@ document.addEventListener('alpine:init', () => {
     },
 
     /**
-     * Identity of the resolution work: the note plus the set of attachment
-     * references it contains. Keying on the REFERENCE SET, not the body text,
-     * is what keeps resolution off the typing path. A body-keyed guard is
-     * invalidated by every keystroke, so every settle would re-resolve and
-     * repaint the whole surface mid-sentence and throw the caret.
+     * Identity of the resolution work, derived by `refSetKey` in media.js —
+     * the note plus the set of attachment ids it references, never the body
+     * text. Deriving it here is what put a full re-resolve and surface repaint
+     * on the typing path once; the rule now lives with the scheme it protects.
      */
     mediaKey() {
-      return this.note.id + '|' + refsIn(this.note.body || '').join(',');
+      return refSetKey(this.note.id, this.note.body);
+    },
+
+    /**
+     * Has the reference set moved since the last resolve? Used by
+     * `reconcileMedia` to keep repaints off the typing path. `resolveMedia`
+     * does its own compare-and-set instead, because it is the only writer of
+     * `_mediaKey`; the two must agree, and they agree because both ask
+     * `mediaKey()`, which is `refSetKey`.
+     */
+    mediaChanged() {
+      return this.mediaKey() !== this._mediaKey;
     },
 
     /**
@@ -213,7 +223,7 @@ document.addEventListener('alpine:init', () => {
      */
     reconcileMedia() {
       if (!this.note) return;
-      if (this.mediaKey() === this._mediaKey) return;
+      if (!this.mediaChanged()) return;
       if (this._reconcileTimer) clearTimeout(this._reconcileTimer);
       this._reconcileTimer = setTimeout(async () => {
         this._reconcileTimer = null;
@@ -835,13 +845,19 @@ document.addEventListener('alpine:init', () => {
       return out;
     },
 
-    exportMD() {
+    async exportMD() {
       if (!this.note) return;
       // D14: an exported .md is read outside NOTED, where `attachment:<id>`
       // resolves to nothing, so referenced images are inlined as data: URIs
-      // here. The note.body itself is untouched.
-      exportMarkdown(
-        { title: this.note.title.trim() || deriveTitle(this.note.body), body: this.note.body },
+      // here. The note.body itself is untouched. `id` must be carried: the
+      // exporter looks attachments up by note id, and dropping it here
+      // silently exported a note whose refs could not be resolved.
+      await exportMarkdown(
+        {
+          id: this.note.id,
+          title: this.note.title.trim() || deriveTitle(this.note.body),
+          body: this.note.body,
+        },
         (id) => this.attachmentsFor(id),
       );
     },

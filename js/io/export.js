@@ -96,12 +96,20 @@ function blobToB64(blob) {
   });
 }
 
-/** One note → one .md download. */
-export function exportMarkdown(note) {
+/**
+ * One note → one .md download.
+ *
+ * D14: `attachment:<id>` means nothing outside NOTED, so referenced images
+ * are inlined as `data:` URIs. The getter is the caller's only route to the
+ * attachment bytes — this module must not import db.js.
+ */
+export async function exportMarkdown(note, getAttachments = null) {
   const title = note.title.trim();
   const body = note.body || '';
   const text = title && !body.startsWith('#') ? `# ${title}\n\n${body}` : body;
-  download(`${slug(title)}.md`, text, 'text/markdown');
+  const atts = getAttachments && note.id ? await getAttachments(note.id) : [];
+  const inlined = await inlineAttachments(text, atts);
+  download(`${slug(title)}.md`, inlined, 'text/markdown');
 }
 
 /**
@@ -125,7 +133,7 @@ export async function exportMarkdownZip(notes, getAttachments = null) {
     let fname = `${slug(title)}.md`;
     for (let i = 1; used.has(fname); i += 1) fname = `${slug(title)}-${i}.md`;
     used.add(fname);
-    zip.file(fname, text);
+    zip.file(fname, inlined);
   }
   const blob = await zip.generateAsync({ type: 'blob' });
   const url = URL.createObjectURL(blob);

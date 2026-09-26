@@ -44,6 +44,9 @@ Naming these gaps is deliberate. The default failure mode of a coding agent is t
 - Every schema change **bumps the Dexie version** and ships a migration.
 - Attachments are referenced from the body as `attachment:<uuid>` (D14). `js/media.js` owns the scheme; resolution happens at render time only. Never write a `blob:` or `data:` URL into `note.body`.
 - **Exports inline attachments.** `.md` and `.zip` downloads rewrite `attachment:<id>` to a `data:` URI (`inlineAttachments()` in `js/io/export.js`), because an exported note is read outside NOTED where the scheme resolves to nothing. This is the one sanctioned exception to "keep the body clean", and it lives in the exporter — never in the body or the DB.
+  - The exporter never imports `db.js`. Callers pass an async **getter** (`attachmentsFor(id)`) and the note must carry its **`id`** — attachments are looked up by note id, so a note passed without one exports with unresolvable refs.
+  - Both entry points must hand `inlineAttachments()`'s **return value** to `download`/`zip.file`. Computing the inlined text and then passing the original is the bug to watch for: `exportMarkdownZip` did exactly that, so `.md` exported clean while every note in the `.zip` kept a bare ref. Test the entry points, not just `inlineAttachments`.
+  - A ref whose attachment is missing, or still encrypted, is **left in place** rather than dropped — the user must be able to see what did not resolve.
 
 ### Routing
 
@@ -73,7 +76,7 @@ Edit mode mounts a contenteditable that renders the note via `marked` + `DOMPuri
 - Undo is the module's own snapshot stack: re-rendering wipes the browser's contenteditable history.
 - The surface is the mount element itself (as in `editor.js`), **not** a wrapper div — a nested div would make `querySelector('.wysiwyg-host')` resolve to the wrong node and swallow every keystroke.
 - The note pane is behind `x-if`, so the surface mounts at a point Alpine chooses — it can land **during** `openNote`'s `await`, after it, or after a note arrives. Every event that changes what the surface should show therefore calls the one idempotent `syncWysiwyg()` (mount, `openNote`, `setMode`) instead of a local `if (this.wysiwyg) setBody(...)` guard. Per-caller guards only work in one order, and the wrong one silently mounts the surface blank; **add a new call site to `syncWysiwyg`, never a new guard.**
-- Attachment resolution is cached on the **set of references** in the body (`mediaKey()`), never on the body text. A body-keyed guard is invalidated by every keystroke, so every debounced settle would repaint the surface and throw the caret (D14).
+- Attachment resolution is cached on the **set of references** in the body, never on the body text. Derive that key with `refSetKey(noteId, body)` in `js/media.js` — it lives beside the scheme because deriving it by hand is the one thing two callers must not do differently. `mediaKey()` in `js/ui/app.js` only delegates to it; a body-keyed guard is invalidated by every keystroke, so every debounced settle would repaint the surface and throw the caret (D14).
 
 ### Process
 
