@@ -27,7 +27,7 @@ The app ships **zero npm dependencies**. Every library loads from a CDN. `packag
 
 - **No build step.** Do not add Vite, webpack, Rollup, esbuild, or TypeScript compilation. An `<script type="importmap">` is **not** a build step — it is declarative CDN wiring; never replace it with a bundler.
 - **No lint step.** Do not add eslint, prettier, or htmlhint without raising it in a PR first.
-- **No test suite.** Do not add vitest, jest, or playwright without raising it in a PR first.
+- **No test suite.** Do not add vitest, jest, or playwright without raising it in a PR first. The one sanctioned check is `pnpm check:shell` (`tools/check-shell.mjs`, D15 Tier 1): a zero-dependency Node script that asserts `SHELL_FILES` in `sw.js` matches the real module graph. Run it before a change to `sw.js`, `js/ui/app.js`, or any module's imports; it fails if a precached file is unreachable or an import is missing from the list.
 - **No CI pipeline.** Deployment is documented in `docs/deployment.md` (`TODO.md` **T16**).
 
 Naming these gaps is deliberate. The default failure mode of a coding agent is to add infrastructure that "should" be there. It isn't.

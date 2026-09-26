@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "serve -s .",
     "start": "serve -s .",
-    "deploy": "bash deploy.sh"
+    "deploy": "bash deploy.sh",
+    "check:shell": "node tools/check-shell.mjs"
   },
   "devDependencies": {
     "serve": "^14.2.4"
