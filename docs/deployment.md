@@ -4,7 +4,7 @@ How to ship NOTED. The source is the artifact — no build step, deployment is a
 
 **Chosen target (T17, 2026-09-23): GitHub Pages (project site) behind a custom subdomain** — `noted.360481025.xyz` maps to `davidhinkley.github.io`. Branch-based publishing from `main`, no Actions workflow, no CI.
 
-**Status (release-ritual verified 2026-09-24):** SW active with scope `https://noted.360481025.xyz/`, cache `noted-v11` holding all shell files, CDN libs runtime-cached, hard-offline create/edit working. *Enforce HTTPS* active (`http://` → 301 → `https://`). Live spot-check: vault lock/unlock matrix, pin toggle + reorder, sort control, zip export path.
+**Status (release-ritual verified 2026-09-27):** `noted-v21` live at the custom domain; `https://davidhinkley.github.io/noted/` 301s there, so the CNAME is active and there is exactly one production URL. Confirmed against production, not just locally: the live `sw.js` reports `noted-v21`, the live `js/ui/wysiwyg.js` carries the editor fix, and the Tier 2 offline-boot case passes end-to-end against `https://noted.360481025.xyz` (worker registers, CDN libs runtime-cached, shell boots with the network cut, IndexedDB content survives). Subpath check re-run: SW scope resolves to `/NOTED/` under a subdirectory. *Enforce HTTPS* active (`http://` → 301 → `https://`).
 
 ## The release ritual — every release, no exceptions
 
@@ -18,11 +18,13 @@ Mirror the layout you are about to ship — root **or** subpath both work (relat
 
 ```sh
 mkdir -p /tmp/subpath-test/NOTED
-cp index.html sw.js manifest.json icon.svg css/ js/ icons/ /tmp/subpath-test/NOTED/
+cp -r index.html sw.js manifest.json icon.svg css js icons /tmp/subpath-test/NOTED/
 npx serve -l 3100 /tmp/subpath-test
 ```
 
-- Open `http://localhost:3100/NOTED/?sw=1` (`?sw=1` forces SW registration; plain localhost skips it in dev — see `js/pwa.js`).
+> Two traps in that command, both hit while verifying the `noted-v21` release. `cp` needs `-r` for the directories, or it aborts with *"omitting directory"* and the mirror is silently incomplete. And serve the parent **without** `-s`: in single-page-app mode `serve` answers a directory request with its own "Files within …" listing instead of `index.html`, so the page under test is not the app at all — it loads clean, with no console errors and no failed requests, which makes it look like a passing run.
+
+Then browse to `http://127.0.0.1:3100/NOTED/?sw=1` (`?sw=1` forces SW registration; plain localhost skips it in dev — see `js/pwa.js`).
 - DevTools → Application → Service Workers: one worker, **scope** must end in `/NOTED/`.
 - Application → Cache Storage → `noted-v<version>`: `index.html`, `css/style.css`, every `js/*`, `manifest.json`, icons are all present under `/NOTED/`.
 - Kill the server. Reload. The shell must render from cache; create, edit, search, tag must all work (IndexedDB is origin-local, unaffected by the network).
