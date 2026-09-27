@@ -9,14 +9,23 @@
  *   1. `.md` download contains a data: URI and zero bare `attachment:<id>`.
  *   2. `.zip` download, unzipped in-page, contains a data: URI and zero bare refs.
  *   3. The app boots with the network unreachable, served by the service worker.
+ *   4. A blank line typed in the editor survives the settle repaint.
  *
  * Requires a network on first run: the CDN libraries are runtime-cached, not
  * precached (see sw.js), so an offline launch is only meaningful after one
  * online load. That limitation is recorded in D15 rather than papered over.
  */
 import { test, expect } from '@playwright/test';
+import { readFileSync } from 'node:fs';
 
 const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8799';
+
+// Read the cache version out of sw.js rather than hardcoding it here. A bump is
+// a release step (D15 Tier 1 checks it), so a copy in this file would either
+// break on every release or — worse — invite someone to weaken the assertion
+// to keep the suite green.
+const CACHE_VERSION = readFileSync(new URL('../sw.js', import.meta.url), 'utf8')
+  .match(/const CACHE_VERSION = '([^']+)'/)[1];
 
 // The app is an Alpine component; its methods live on the instance, not on
 // window and not as module exports.
@@ -130,7 +139,7 @@ test.describe('D15 Tier 2: export inlining and offline boot', () => {
       const names = await caches.keys();
       return names;
     });
-    expect(cached, 'the service worker never opened a cache').toContain('noted-v20');
+    expect(cached, 'the service worker never opened a cache').toContain(CACHE_VERSION);
 
     // Seed a note directly through the storage layer. The point of this test
     // is that IndexedDB survives a boot with no network, so it should not be
@@ -175,11 +184,11 @@ test.describe('D15 Tier 2: export inlining and offline boot', () => {
 
     // Confirm the shell cached a cross-origin entry before cutting the
     // network, otherwise the offline boot below would assert nothing.
-    const runtimeCached = await page.evaluate(async () => {
-      const cache = await caches.open('noted-v20');
+    const runtimeCached = await page.evaluate(async (version) => {
+      const cache = await caches.open(version);
       const keys = await cache.keys();
       return keys.filter((r) => new URL(r.url).origin !== self.location.origin).length;
-    });
+    }, CACHE_VERSION);
     expect(runtimeCached, 'no CDN runtime entries were cached; offline boot is untestable').toBeGreaterThan(0);
 
     await context.setOffline(true);
@@ -202,5 +211,81 @@ test.describe('D15 Tier 2: export inlining and offline boot', () => {
     });
     expect(bodies.some((b) => b.includes('offline boot data')),
       'IndexedDB content did not survive an offline boot').toBe(true);
+  });
+});
+
+test.describe('D15 Tier 2: the editor does not eat blank lines', () => {
+  // Markdown cannot represent a trailing empty block -- `marked` drops
+  // trailing blank lines -- so a settle that re-renders for that difference
+  // deletes the line the user just created and strands the caret in the
+  // previous block. The symptom is not a lost line but misplaced text: the
+  // next keystroke is concatenated onto the previous line. Both halves of
+  // that are asserted here, because "the line disappeared" is the half that
+  // is visible and "my text merged into the wrong line" is the half that
+  // loses work.
+
+  const blocks = (page) =>
+    page.locator('.wysiwyg-host').evaluate((h) => h.children.length);
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto(BASE_URL + '/#/');
+    await page.waitForSelector('[x-data]');
+    await page.click('button:has-text("+ New")');
+    await page.waitForSelector('.wysiwyg-host');
+    await page.waitForTimeout(300);
+  });
+
+  test('Enter on a brand-new note keeps the blank line', async ({ page }) => {
+    await page.locator('.wysiwyg-host').click();
+    expect(await blocks(page)).toBe(1);
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(600); // well past SETTLE_MS
+
+    expect(await blocks(page), 'the blank line was swallowed by the repaint').toBe(2);
+  });
+
+  test('text typed after Enter lands on the new line, not the previous one', async ({ page }) => {
+    const host = page.locator('.wysiwyg-host');
+    await host.click();
+    await page.keyboard.type('one');
+    await page.waitForTimeout(600);
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(600);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(600);
+    expect(await blocks(page), 'the second Enter was swallowed').toBe(3);
+
+    await page.keyboard.type('two');
+    await page.waitForTimeout(600);
+
+    const body = await page.evaluate(() => {
+      const a = document.querySelector('[x-data]')._x_dataStack[0];
+      return a.note.body;
+    });
+    expect(body, 'the new text was concatenated onto the previous line').toBe('one\n\ntwo');
+  });
+
+  test('Enter mid-line still splits the paragraph and places the caret correctly', async ({ page }) => {
+    await page.locator('.wysiwyg-host').click();
+    await page.keyboard.type('hello world');
+    await page.waitForTimeout(600);
+    for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowLeft');
+
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(600);
+    expect(await blocks(page)).toBe(2);
+
+    // Guards the fix: skipping the repaint must not strand the caret when the
+    // edit *is* real formatting, or every Enter would stop splitting.
+    await page.keyboard.type('XY');
+    await page.waitForTimeout(600);
+
+    const body = await page.evaluate(() => {
+      const a = document.querySelector('[x-data]')._x_dataStack[0];
+      return a.note.body;
+    });
+    expect(body).toBe('hello\n\nXY world');
   });
 });

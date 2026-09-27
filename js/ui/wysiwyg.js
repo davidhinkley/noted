@@ -471,12 +471,28 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange, onAttachIma
     // Mark the caret before serializing, for the reason on SENTINEL.
     const tagged = insertSentinel(host);
     const md = tidy(getSerializer().turndown(host.innerHTML));
-    if (md === painted) {
-      // The round-trip was a no-op (typing inside a fenced code block, say):
-      // leave the DOM alone, just take the marker back out.
+    // The sentinel rode through the serializer; what is published and compared
+    // must not contain it.
+    const clean = md.split(SENTINEL).join('');
+    // A bare trailing newline is not formatting, and Markdown cannot represent
+    // a trailing empty block: `marked` drops trailing blank lines on the way
+    // back, so re-rendering for this difference deletes the line the user just
+    // created and strands the caret in the previous block -- the next
+    // keystroke then lands in the wrong place and is concatenated onto the
+    // previous line. So treat a trailing-blank-only difference like a no-op:
+    // publish it, but leave the DOM alone. The DOM stays authoritative while
+    // editing and the buffer catches up on the next settle that carries
+    // content.
+    const trailingBlankOnly = clean.replace(/\n+$/, '') === painted.replace(/\n+$/, '');
+    if (clean === painted || trailingBlankOnly) {
+      // Leave the DOM alone, just take the marker back out.
       if (tagged) {
         stripSentinel(host);
         writeCaret(host, position);
+      }
+      if (clean !== painted) {
+        painted = clean;
+        onBodyChange(clean);
       }
       return;
     }
@@ -486,8 +502,8 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange, onAttachIma
     paint(md, position, tagged);
     // The DOM is sentinel-free by now, so what is published must be too.
     // Publishing before the paint would leak the marker into note.body.
-    painted = md.split(SENTINEL).join('');
-    onBodyChange(painted);
+    painted = clean;
+    onBodyChange(clean);
   }
 
   function schedule() {
