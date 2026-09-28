@@ -483,7 +483,22 @@ export function createWysiwygEditor(parent, { getBody, onBodyChange, onAttachIma
     // publish it, but leave the DOM alone. The DOM stays authoritative while
     // editing and the buffer catches up on the next settle that carries
     // content.
-    const trailingBlankOnly = clean.replace(/\n+$/, '') === painted.replace(/\n+$/, '');
+    //
+    // Decided against the DOM, not the buffer. `painted` lags the DOM by one
+    // settle cycle whenever the user types past the debounce, so a comparison
+    // against it alone misses exactly the case that matters: the user typed,
+    // pressed Enter, and the settle fires before the buffer ever saw the text.
+    // The DOM's last block is empty but `painted` is still the pre-typing
+    // buffer, so the buffer comparison sees real content where there is only
+    // a fresh blank line -- and the repaint moves the caret into the previous
+    // block.
+    const blocks = blockElements(host);
+    const lastBlock = blocks[blocks.length - 1];
+    const domEndsEmpty =
+      blocks.length > 0 &&
+      lastBlock.textContent.split(SENTINEL).join('').trim() === '';
+    const trailingBlankOnly =
+      clean.replace(/\n+$/, '') === painted.replace(/\n+$/, '') || domEndsEmpty;
     if (clean === painted || trailingBlankOnly) {
       // Leave the DOM alone, just take the marker back out.
       if (tagged) {

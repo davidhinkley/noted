@@ -288,4 +288,26 @@ test.describe('D15 Tier 2: the editor does not eat blank lines', () => {
     });
     expect(body).toBe('hello\n\nXY world');
   });
+
+  test('Enter pressed before the preceding settle still keeps the new line usable', async ({ page }) => {
+    // The hole this fix closes. `painted` lags the DOM by one settle cycle
+    // whenever the user types past the debounce, so a buffer comparison sees
+    // "real content" where there is only a fresh blank line -- and the repaint
+    // moves the caret into the previous block. No waits between type and Enter
+    // here, so the settle fires with the buffer still at its pre-typing value.
+    // Without the DOM-based check this stores "onetwo".
+    await page.locator('.wysiwyg-host').click();
+    await page.keyboard.type('one');
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(700);
+
+    await page.keyboard.type('two');
+    await page.waitForTimeout(700);
+
+    const body = await page.evaluate(() => {
+      const a = document.querySelector('[x-data]')._x_dataStack[0];
+      return a.note.body;
+    });
+    expect(body, 'the new text was concatenated onto the previous line').toBe('one\n\ntwo');
+  });
 });
